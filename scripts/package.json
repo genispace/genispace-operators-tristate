@@ -1,0 +1,15 @@
+{
+  "name": "ttx-export",
+  "version": "1.0.0",
+  "description": "通天晓WMS数据导出工具",
+  "main": "ttx_export.js",
+  "scripts": {
+    "export": "node ttx_export.js",
+    "export:visible": "HEADLESS=false node ttx_export.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^21.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}

@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  ttx-export:
+    build: .
+    image: ttx-export:latest
+    container_name: ttx-export
+    
+    # 环境变量配置
+    environment:
+      # 连接配置
+      - TTX_BASE_URL=https://ttx.56xyy.com
+      - TTX_CUSTOMER=xyy-wms-prod
+      - TTX_USERNAME=HFLS17
+      - TTX_PASSWORD=Xyy1234567
+      
+      # 报表类型: inbound (入库明细), b2c_shipment (B2C出库单), all (全部)
+      - REPORT_TYPE=all
+      
+      # 通用查询条件
+      - TTX_WAREHOUSE=HF
+      - TTX_COMPANY=HF-SPD
+      # - TTX_START_DATE=2026-02-01 00:00:00  # 不设置则默认本月1日
+      # - TTX_END_DATE=2026-02-28 23:59:59
+      
+      # 入库报表特有条件
+      - TTX_RECEIPT_TYPES=CGRK,DBRK,THRK,QTRK,B2BRK,HHRK
+      
+      # B2C出库单特有条件
+      - TTX_PROCESS_TYPE=NORMAL
+      # - TTX_LEADING_STS_BEGIN=100  # 首状态起始值
+      # - TTX_LEADING_STS_END=100    # 首状态结束值
+      
+      # 输出配置
+      - OUTPUT_DIR=/app/output
+      - OUTPUT_FORMAT=both  # csv, json, both
+      
+      # 运行配置
+      - HEADLESS=true
+      - PAGE_SIZE=500
+    
+    # 挂载输出目录
+    volumes:
+      - ./output:/app/output
+    
+    # 网络配置
+    # network_mode: host  # 如果需要访问宿主机网络，取消注释
+    
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M

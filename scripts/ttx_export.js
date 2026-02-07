@@ -281,6 +281,186 @@ class TTXExporter {
         return allData;
     }
     
+    /**
+     * 获取B2C出库单数据
+     * @param {Object} options 查询选项
+     * @param {string} options.warehouseCode 仓库代码
+     * @param {string} options.companyCode 货主代码
+     * @param {string} options.processType 处理类型 (NORMAL, URGENT等)
+     * @param {number} options.leadingStsBegin 首状态起始值
+     * @param {number} options.leadingStsEnd 首状态结束值
+     * @param {string} options.startDate 开始日期
+     * @param {string} options.endDate 结束日期
+     * @param {number} options.pageSize 每页数量
+     */
+    async getB2CShipmentReport(options = {}) {
+        const {
+            warehouseCode = 'HF',
+            companyCode = null,
+            processType = 'NORMAL',
+            leadingStsBegin = null,
+            leadingStsEnd = null,
+            startDate = null,
+            endDate = null,
+            pageSize = 500
+        } = options;
+        
+        // 构建筛选条件
+        const filters = { and: [] };
+        
+        // 固定条件：B2C出库单
+        filters.and.push({
+            field: 'shipObjType',
+            operator: '=',
+            value: 'TO_C',
+            table: 'shipment_header'
+        });
+        
+        if (warehouseCode) {
+            filters.and.push({
+                field: 'shipment_header.warehouseCode',
+                operator: '=',
+                value: warehouseCode
+            });
+        }
+        
+        if (companyCode) {
+            filters.and.push({
+                field: 'shipment_header.companyCode',
+                operator: '=',
+                value: companyCode
+            });
+        }
+        
+        if (processType) {
+            filters.and.push({
+                field: 'shipment_header.processType',
+                operator: 'in',
+                disOperator: 'IN',
+                value: processType,
+                type: 'multiSelectCombobox'
+            });
+        }
+        
+        if (leadingStsBegin !== null) {
+            filters.and.push({
+                field: 'leadingSts:beg',
+                operator: '>=',
+                value: String(leadingStsBegin),
+                table: 'shipment_header'
+            });
+        }
+        
+        if (leadingStsEnd !== null) {
+            filters.and.push({
+                field: 'leadingSts:end',
+                operator: '<=',
+                value: String(leadingStsEnd),
+                table: 'shipment_header'
+            });
+        }
+        
+        if (startDate) {
+            filters.and.push({
+                field: 'shipment_header.created:beg',
+                operator: '>=',
+                value: startDate
+            });
+        }
+        
+        if (endDate) {
+            filters.and.push({
+                field: 'shipment_header.created:end',
+                operator: '<=',
+                value: endDate
+            });
+        }
+        
+        const filterJson = JSON.stringify(filters);
+        console.log(`查询条件: ${filterJson}`);
+        
+        // 定义返回字段
+        const resultFields = [
+            'id', 'created', 'frontTime', 'payTime', 'code', 'shipmentType',
+            'companyCode', 'carrierCode', 'processType', 'userDef1',
+            'sourceOrderCode', 'primaryWaybillCode', 'waveId', 'storeName',
+            'shipToState', 'shipToCity', 'qtyRatio', 'totalQty', 'totalLines',
+            'shipToAttentionTo', 'consolidated', 'warehouseTransferCode',
+            'leadingSts', 'trailingSts', 'uploadByAt', 'uploadByUser',
+            'rejectionNote', 'actualShipDateTime', 'uploadBatch', 'deliveryNote', 'userDef5'
+        ].join(',');
+        
+        // 分页获取数据
+        const allData = [];
+        let pageStart = 0;
+        
+        while (true) {
+            console.log(`获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
+            
+            const result = await this.page.evaluate(async (args) => {
+                const { filterJson, pageStart, pageSize, resultFields } = args;
+                
+                try {
+                    const path = '/rest/cbt/shipment_header';
+                    
+                    // 使用 dataManager.get 方法
+                    return new Promise((resolve) => {
+                        const options = {
+                            headers: {
+                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                                'X-Bill': 'shipment_header',
+                                'X-Result-Fields': resultFields,
+                                'filter': encodeURIComponent(filterJson),
+                                'Accept': 'application/javascript, application/json'
+                            }
+                        };
+                        
+                        window.app.dataManager.get(path, options).then(
+                            (data) => {
+                                if (Array.isArray(data)) {
+                                    resolve({ success: true, data: data });
+                                } else if (data && data.error) {
+                                    resolve({ success: false, error: data.msg || 'Unknown error' });
+                                } else {
+                                    resolve({ success: true, data: data });
+                                }
+                            },
+                            (error) => {
+                                resolve({ success: false, error: error.message || String(error) });
+                            }
+                        );
+                    });
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            }, { filterJson, pageStart, pageSize, resultFields });
+            
+            if (!result.success) {
+                console.error(`获取数据失败: ${result.error}`);
+                break;
+            }
+            
+            const batch = result.data || [];
+            if (batch.length === 0) {
+                break;
+            }
+            
+            console.log(`  获取到 ${batch.length} 条记录`);
+            allData.push(...batch);
+            
+            if (batch.length < pageSize) {
+                break;
+            }
+            
+            pageStart += pageSize;
+            await this.page.waitForTimeout(500);
+        }
+        
+        console.log(`\n共获取 ${allData.length} 条记录`);
+        return allData;
+    }
+    
     exportToCsv(data, filename = 'inbound_report.csv') {
         if (!data || data.length === 0) {
             console.log('没有数据可导出');
@@ -329,13 +509,64 @@ class TTXExporter {
     }
 }
 
+/**
+ * 从环境变量获取配置
+ */
+function getConfig() {
+    return {
+        // 连接配置
+        baseUrl: process.env.TTX_BASE_URL || 'https://ttx.56xyy.com',
+        customer: process.env.TTX_CUSTOMER || 'xyy-wms-prod',
+        username: process.env.TTX_USERNAME || 'HFLS17',
+        password: process.env.TTX_PASSWORD || 'Xyy1234567',
+        
+        // 报表类型: inbound (入库明细), b2c_shipment (B2C出库单), all (全部)
+        reportType: process.env.REPORT_TYPE || 'all',
+        
+        // 通用查询条件
+        warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
+        companyCode: process.env.TTX_COMPANY || 'HF-SPD',
+        startDate: process.env.TTX_START_DATE || null,  // 默认为本月1日
+        endDate: process.env.TTX_END_DATE || null,
+        
+        // 入库报表特有条件
+        receiptTypes: process.env.TTX_RECEIPT_TYPES 
+            ? process.env.TTX_RECEIPT_TYPES.split(',') 
+            : ['CGRK', 'DBRK', 'THRK', 'QTRK', 'B2BRK', 'HHRK'],
+        
+        // B2C出库单特有条件
+        processType: process.env.TTX_PROCESS_TYPE || 'NORMAL',
+        leadingStsBegin: process.env.TTX_LEADING_STS_BEGIN ? parseInt(process.env.TTX_LEADING_STS_BEGIN, 10) : null,
+        leadingStsEnd: process.env.TTX_LEADING_STS_END ? parseInt(process.env.TTX_LEADING_STS_END, 10) : null,
+        
+        // 输出配置
+        outputDir: process.env.OUTPUT_DIR || '.',
+        outputFormat: process.env.OUTPUT_FORMAT || 'both',  // csv, json, both
+        
+        // 运行配置
+        headless: process.env.HEADLESS !== 'false',
+        pageSize: parseInt(process.env.PAGE_SIZE || '500', 10)
+    };
+}
+
 async function main() {
+    const config = getConfig();
+    
+    console.log('=== 通天晓WMS数据导出 ===');
+    console.log(`目标: ${config.baseUrl}`);
+    console.log(`租户: ${config.customer}`);
+    console.log(`用户: ${config.username}`);
+    console.log(`仓库: ${config.warehouseCode}`);
+    console.log(`报表类型: ${config.reportType}`);
+    console.log(`输出目录: ${config.outputDir}`);
+    console.log('');
+    
     const exporter = new TTXExporter({
-        baseUrl: 'https://ttx.56xyy.com',
-        customer: 'xyy-wms-prod',
-        username: 'HFLS17',
-        password: 'Xyy1234567',
-        headless: true  // 设为 false 可以看到浏览器操作
+        baseUrl: config.baseUrl,
+        customer: config.customer,
+        username: config.username,
+        password: config.password,
+        headless: config.headless
     });
     
     try {
@@ -344,36 +575,103 @@ async function main() {
         const loggedIn = await exporter.login();
         if (!loggedIn) {
             console.error('登录失败，退出');
-            return;
+            process.exit(1);
         }
         
-        // 设置查询条件
-        const today = new Date();
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        const startDate = startOfMonth.toISOString().slice(0, 10) + ' 00:00:00';
+        // 确保输出目录存在
+        if (!fs.existsSync(config.outputDir)) {
+            fs.mkdirSync(config.outputDir, { recursive: true });
+        }
         
-        const data = await exporter.getInboundReport({
-            warehouseCode: 'HF',
-            companyCode: 'HF-SPD',
-            receiptTypes: ['CGRK', 'DBRK', 'THRK', 'QTRK', 'B2BRK', 'HHRK'],
-            startDate: startDate,
-            pageSize: 500
-        });
+        // 设置默认开始日期（本月1日）
+        let startDate = config.startDate;
+        if (!startDate) {
+            const today = new Date();
+            const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            startDate = startOfMonth.toISOString().slice(0, 10) + ' 00:00:00';
+        }
         
-        if (data.length > 0) {
-            exporter.exportToCsv(data, 'inbound_report.csv');
-            exporter.exportToJson(data, 'inbound_report.json');
+        // 根据报表类型导出
+        const reportType = config.reportType.toLowerCase();
+        
+        // 导出入库明细报表
+        if (reportType === 'inbound' || reportType === 'all') {
+            console.log('\n========== 入库明细报表 ==========\n');
             
-            console.log('\n=== 数据示例 ===');
-            const sample = data[0];
-            for (const [key, value] of Object.entries(sample)) {
-                if (key !== '__id') {
-                    console.log(`  ${key}: ${value}`);
+            const inboundData = await exporter.getInboundReport({
+                warehouseCode: config.warehouseCode,
+                companyCode: config.companyCode,
+                receiptTypes: config.receiptTypes,
+                startDate: startDate,
+                endDate: config.endDate,
+                pageSize: config.pageSize
+            });
+            
+            if (inboundData.length > 0) {
+                const csvPath = path.join(config.outputDir, 'inbound_report.csv');
+                const jsonPath = path.join(config.outputDir, 'inbound_report.json');
+                
+                if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
+                    exporter.exportToCsv(inboundData, csvPath);
                 }
+                if (config.outputFormat === 'json' || config.outputFormat === 'both') {
+                    exporter.exportToJson(inboundData, jsonPath);
+                }
+                
+                console.log('\n--- 数据示例 ---');
+                const sample = inboundData[0];
+                for (const [key, value] of Object.entries(sample)) {
+                    if (key !== '__id') {
+                        console.log(`  ${key}: ${value}`);
+                    }
+                }
+            } else {
+                console.log('未获取到入库数据');
             }
         }
+        
+        // 导出B2C出库单
+        if (reportType === 'b2c_shipment' || reportType === 'all') {
+            console.log('\n========== B2C出库单 ==========\n');
+            
+            const shipmentData = await exporter.getB2CShipmentReport({
+                warehouseCode: config.warehouseCode,
+                companyCode: config.companyCode,
+                processType: config.processType,
+                leadingStsBegin: config.leadingStsBegin,
+                leadingStsEnd: config.leadingStsEnd,
+                startDate: startDate,
+                endDate: config.endDate,
+                pageSize: config.pageSize
+            });
+            
+            if (shipmentData.length > 0) {
+                const csvPath = path.join(config.outputDir, 'b2c_shipment_report.csv');
+                const jsonPath = path.join(config.outputDir, 'b2c_shipment_report.json');
+                
+                if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
+                    exporter.exportToCsv(shipmentData, csvPath);
+                }
+                if (config.outputFormat === 'json' || config.outputFormat === 'both') {
+                    exporter.exportToJson(shipmentData, jsonPath);
+                }
+                
+                console.log('\n--- 数据示例 ---');
+                const sample = shipmentData[0];
+                for (const [key, value] of Object.entries(sample)) {
+                    if (key !== '__id') {
+                        console.log(`  ${key}: ${value}`);
+                    }
+                }
+            } else {
+                console.log('未获取到B2C出库单数据');
+            }
+        }
+        
+        console.log('\n=== 导出完成 ===');
     } catch (error) {
         console.error('错误:', error);
+        process.exit(1);
     } finally {
         await exporter.close();
     }

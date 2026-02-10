@@ -2,7 +2,7 @@
 /**
  * 通天晓WMS - 数据导出主入口
  * 
- * 支持入库单头部、入库单明细、B2C出库单等多种报表类型的导出
+ * 支持入库单头部、入库单明细、B2C出库单、B2B出库单等多种报表类型的导出
  * 
  * 依赖安装：
  *   npm install puppeteer-core dotenv
@@ -24,6 +24,7 @@ const { execSync } = require('child_process');
 const { ReceiptHeaderExporter } = require('./ttx_receipt_header');
 const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
 const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
+const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -71,7 +72,7 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), all (全部)
+        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), all (全部)
         reportType: process.env.REPORT_TYPE || 'receipt_header',
         
         // 通用查询条件
@@ -375,6 +376,43 @@ async function main() {
                 printSampleData(data);
             } else {
                 console.log('未获取到B2C出库单数据');
+            }
+        }
+        
+        // 导出B2B出库单
+        if (reportType === 'b2b_shipment' || reportType === 'all') {
+            console.log('\n========== B2B出库单 ==========\n');
+            
+            const exporter = new B2BShipmentExporter({ page });
+            
+            const data = await exporter.getReport({
+                warehouseCode: config.warehouseCode,
+                companyCode: config.companyCode,
+                processType: config.processType,
+                leadingStsBegin: config.leadingStsBegin,
+                leadingStsEnd: config.leadingStsEnd,
+                startDate: startDate,
+                endDate: config.endDate,
+                pageSize: config.pageSize
+            });
+            
+            if (data.length > 0) {
+                const csvPath = path.join(config.outputDir, 'b2b_shipment_report.csv');
+                const jsonPath = path.join(config.outputDir, 'b2b_shipment_report.json');
+                
+                if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
+                    exportToCsv(data, csvPath);
+                }
+                if (config.outputFormat === 'json' || config.outputFormat === 'both') {
+                    exportToJson(data, jsonPath);
+                }
+                if (config.outputFormat === 'dataSource' || config.outputFormat === 'both') {
+                    await exporter.exportToDataSource(data);
+                }
+                
+                printSampleData(data);
+            } else {
+                console.log('未获取到B2B出库单数据');
             }
         }
         

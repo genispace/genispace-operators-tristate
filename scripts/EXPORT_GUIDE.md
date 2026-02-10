@@ -64,6 +64,9 @@ export REPORT_TYPE='b2c_shipment'
 # 导出 B2B 出库单
 export REPORT_TYPE='b2b_shipment'
 
+# 导出 B2C 拣货明细
+export REPORT_TYPE='paking_details'
+
 # 导出全部报表
 export REPORT_TYPE='all'
 ```
@@ -169,6 +172,19 @@ node ttx_export.js
 **输出文件：**
 - `b2b_shipment_report.csv`
 - `b2b_shipment_report.json`
+
+### B2C拣货明细（paking_details）
+
+导出B2C拣货明细报表，包含拣货任务、SKU信息、拣货员等详细数据。
+
+**查询参数：**
+- `startDate`: 创建开始日期
+- `endDate`: 创建结束日期
+- `pageSize`: 每页数量（默认 100）
+
+**输出文件：**
+- `b2c_paking_details_report.csv`
+- `b2c_paking_details_report.json`
 
 ## 字段映射
 
@@ -308,6 +324,28 @@ node ttx_export.js
 || `packageCenterName` | `store` |
 || `warehouseCode` | `warehouse` |
 
+### B2C拣货明细字段映射
+
+| 原始字段 | 目标字段 |
+|----------|----------|
+| `qty` | `qty` |
+| `sku` | `sku` |
+| `owner` | `owner` |
+| `picker` | `picker` |
+| `task_no` | `task_no` |
+| `wave_no` | `wave_no` |
+| `source_type` | `source_type` |
+| `process_type` | `process_type` |
+| `product_name` | `product_name` |
+| `product_size` | `product_size` |
+| `style_number` | `style_number` |
+| `business_type` | `business_type` |
+| `source_order_no` | `source_order_no` |
+| `picking_end_time` | `picking_end_time` |
+| `picking_location` | `picking_location` |
+| `task_create_time` | `task_create_time` |
+| `picking_start_time` | `picking_start_time` |
+
 ## 数据脱敏
 
 ### 功能概述
@@ -386,6 +424,11 @@ maskSensitiveData(records) {
 - **URL**: `https://api.genispace.cn/datasources/809a7e42-6f79-4a82-b776-2734a7076f25/data`
 - **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
 
+### B2C 拣货明细 API
+
+- **URL**: `https://api.genispace.cn/datasources/da65089e-0772-465c-b034-06956304c373/data`
+- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
+
 ## 常见问题
 
 ### 登录失败
@@ -404,15 +447,17 @@ maskSensitiveData(records) {
 
 ```
 scripts/
-├── ttx_export.js            # 主导出脚本（入口）
-├── ttx_receipt_header.js    # 入库单头部导出模块
-├── ttx_receipt_details.js   # 入库单明细导出模块
-├── ttx_b2c_shipment.js      # B2C 出库单导出模块
-├── ttx_b2b_shipment.js      # B2B 出库单导出模块
-├── .env.example             # 环境变量示例
-└── output/                  # 输出目录
+├── ttx_export.js              # 主导出脚本（入口）
+├── ttx_receipt_header.js      # 入库单头部导出模块
+├── ttx_receipt_details.js     # 入库单明细导出模块
+├── ttx_b2c_shipment.js        # B2C 出库单导出模块
+├── ttx_b2b_shipment.js        # B2B 出库单导出模块
+├── ttx_b2c_paking_details.js # B2C 拣货明细导出模块
+├── .env.example               # 环境变量示例
+└── output/                    # 输出目录
     ├── b2c_shipment_report.json
     ├── b2b_shipment_report.json
+    ├── b2c_paking_details_report.json
     └── inbound_report.json
 ```
 
@@ -425,3 +470,4 @@ scripts/
 || 2026-02-10 | 1.2 | 新增 dataSource 输出格式；支持直接同步到 API |
 || 2026-02-10 | 1.3 | 新增 receiver 字段脱敏功能 |
 || 2026-02-11 | 1.4 | 新增 B2B 出库单导出功能；支持 B2B 敏感字段脱敏 |
+| 1.5 | 新增 B2C 拣货明细导出功能 |

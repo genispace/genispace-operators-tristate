@@ -25,6 +25,7 @@ const { ReceiptHeaderExporter } = require('./ttx_receipt_header');
 const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
 const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
+const { B2CPakingDetailsExporter } = require('./ttx_b2c_paking_details');
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -72,12 +73,13 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), all (全部)
+        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), paking_details (B2C拣货明细), all (全部)
         reportType: process.env.REPORT_TYPE || 'receipt_header',
         
         // 通用查询条件
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
         companyCode: process.env.TTX_COMPANY || 'HF-SPD',
+        companyCodes: process.env.TTX_COMPANY_CODES || null,  // 货主代码列表（逗号分隔），用于拣货明细等多货主筛选
         startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
         endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
         
@@ -413,6 +415,39 @@ async function main() {
                 printSampleData(data);
             } else {
                 console.log('未获取到B2B出库单数据');
+            }
+        }
+        
+        // 导出B2C拣货明细
+        if (reportType === 'paking_details' || reportType === 'all') {
+            console.log('\n========== B2C拣货明细 ==========\n');
+            
+            const exporter = new B2CPakingDetailsExporter({ page });
+            
+            const data = await exporter.getReport({
+                startDate: startDate,
+                endDate: config.endDate,
+                companyCodes: config.companyCodes,
+                pageSize: config.pageSize
+            });
+            
+            if (data.length > 0) {
+                const csvPath = path.join(config.outputDir, 'b2c_paking_details_report.csv');
+                const jsonPath = path.join(config.outputDir, 'b2c_paking_details_report.json');
+                
+                if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
+                    exportToCsv(data, csvPath);
+                }
+                if (config.outputFormat === 'json' || config.outputFormat === 'both') {
+                    exportToJson(data, jsonPath);
+                }
+                if (config.outputFormat === 'dataSource' || config.outputFormat === 'both') {
+                    await exporter.exportToDataSource(data);
+                }
+                
+                printSampleData(data);
+            } else {
+                console.log('未获取到B2C拣货明细数据');
             }
         }
         

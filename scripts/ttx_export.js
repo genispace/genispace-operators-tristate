@@ -1,23 +1,29 @@
 #!/usr/bin/env node
 /**
- * 通天晓WMS - 入库明细报表数据导出脚本 (Node.js版本)
+ * 通天晓WMS - 数据导出主入口
  * 
- * 使用 Puppeteer 进行浏览器自动化，完全模拟浏览器行为
+ * 支持入库单头部、入库单明细、B2C出库单等多种报表类型的导出
  * 
  * 依赖安装：
- *   npm install puppeteer
+ *   npm install puppeteer-core dotenv
  * 
  * 使用方法：
+ *   cp .env.example .env
+ *   # 编辑 .env 文件配置参数
  *   node ttx_export.js
- * 
- * 或者作为模块导入：
- *   const { TTXExporter } = require('./ttx_export.js');
  */
+
+require('dotenv').config();
 
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+
+// 导入导出模块
+const { ReceiptHeaderExporter } = require('./ttx_receipt_header');
+const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
+const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -54,461 +60,6 @@ function findChromePath() {
     throw new Error('未找到 Chrome/Chromium 浏览器，请安装 Chrome 或设置 CHROME_PATH 环境变量');
 }
 
-class TTXExporter {
-    constructor(options = {}) {
-        this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
-        this.customer = options.customer || 'xyy-wms-prod';
-        this.username = options.username || '';
-        this.password = options.password || '';
-        this.locale = options.locale || 'zh';
-        this.headless = options.headless !== false;
-        this.chromePath = options.chromePath || process.env.CHROME_PATH || null;
-        
-        this.browser = null;
-        this.page = null;
-    }
-    
-    async init() {
-        const chromePath = this.chromePath || findChromePath();
-        console.log(`使用浏览器: ${chromePath}`);
-        console.log('启动浏览器...');
-        
-        this.browser = await puppeteer.launch({
-            executablePath: chromePath,
-            headless: this.headless ? 'new' : false,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        this.page = await this.browser.newPage();
-        
-        // 设置viewport
-        await this.page.setViewport({ width: 1920, height: 1080 });
-    }
-    
-    async login() {
-        console.log(`访问: ${this.baseUrl}`);
-        const url = `${this.baseUrl}/index.html?customer=${this.customer}&lang=${this.locale}`;
-        await this.page.goto(url, { waitUntil: 'networkidle2' });
-        
-        // 等待页面加载
-        await this.page.waitForTimeout(3000);
-        
-        // 查找登录iframe
-        const frames = this.page.frames();
-        let loginFrame = null;
-        
-        for (const frame of frames) {
-            if (frame.url().includes('loginPage')) {
-                loginFrame = frame;
-                break;
-            }
-        }
-        
-        if (loginFrame) {
-            console.log(`正在登录: ${this.username}`);
-            
-            // 等待用户名输入框
-            await loginFrame.waitForSelector('#username', { timeout: 10000 });
-            
-            // 填写登录信息
-            await loginFrame.type('#username', this.username);
-            await loginFrame.type('#password', this.password);
-            
-            // 点击登录
-            await loginFrame.click('.login_btn');
-            
-            // 等待登录完成 - 等待导航菜单出现或更长时间
-            console.log('等待登录完成...');
-            await this.page.waitForTimeout(8000);
-        } else {
-            console.log('未找到登录iframe，可能已经登录');
-        }
-        
-        // 多次检查登录状态
-        let sessionInfo = { success: false };
-        for (let i = 0; i < 5; i++) {
-            sessionInfo = await this.page.evaluate(() => {
-                if (window.app && window.app.session && window.app.session.token) {
-                    return {
-                        success: true,
-                        user: window.app.session.user,
-                        userName: window.app.session.userName,
-                        token: window.app.session.token,
-                        client: window.app.session.client
-                    };
-                }
-                return { success: false };
-            });
-            
-            if (sessionInfo.success) {
-                break;
-            }
-            console.log(`等待session初始化... (${i + 1}/5)`);
-            await this.page.waitForTimeout(2000);
-        }
-        
-        if (sessionInfo.success) {
-            console.log(`登录成功: ${sessionInfo.userName} (${sessionInfo.user})`);
-            console.log(`Token: ${sessionInfo.token.substring(0, 8)}...`);
-            return true;
-        } else {
-            console.error('登录失败');
-            return false;
-        }
-    }
-    
-    async getInboundReport(options = {}) {
-        const {
-            warehouseCode = 'HF',
-            companyCode = null,
-            receiptTypes = null,
-            startDate = null,
-            endDate = null,
-            pageSize = 500
-        } = options;
-        
-        // 构建筛选条件
-        const filters = { and: [] };
-        
-        if (warehouseCode) {
-            filters.and.push({
-                field: 'rh.warehouseCode',
-                value: warehouseCode,
-                operator: 'in'
-            });
-        }
-        
-        if (companyCode) {
-            filters.and.push({
-                field: 'rd.companyCode',
-                value: companyCode,
-                operator: 'in'
-            });
-        }
-        
-        if (receiptTypes && receiptTypes.length > 0) {
-            filters.and.push({
-                field: 'rh.receiptType',
-                value: receiptTypes.join(','),
-                operator: 'in'
-            });
-        }
-        
-        if (startDate) {
-            filters.and.push({
-                field: 'rh.created:begin',
-                value: startDate,
-                operator: '>='
-            });
-        }
-        
-        if (endDate) {
-            filters.and.push({
-                field: 'rh.created:end',
-                value: endDate,
-                operator: '<='
-            });
-        }
-        
-        const filterJson = JSON.stringify(filters);
-        console.log(`查询条件: ${filterJson}`);
-        
-        // 分页获取数据
-        const allData = [];
-        let pageStart = 0;
-        
-        while (true) {
-            console.log(`获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
-            
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize } = args;
-                
-                try {
-                    const path = '/rest/sqlTemplate/grid/_XLS_reciept1/入库明细报表';
-                    
-                    // 使用 dataManager.get 方法，它会自动处理所有认证
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
-                        
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else {
-                                    resolve({ success: true, data: data });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize });
-            
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-            
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-            
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
-            
-            if (batch.length < pageSize) {
-                break;
-            }
-            
-            pageStart += pageSize;
-            await this.page.waitForTimeout(500);
-        }
-        
-        console.log(`\n共获取 ${allData.length} 条记录`);
-        return allData;
-    }
-    
-    /**
-     * 获取B2C出库单数据
-     * @param {Object} options 查询选项
-     * @param {string} options.warehouseCode 仓库代码
-     * @param {string} options.companyCode 货主代码
-     * @param {string} options.processType 处理类型 (NORMAL, URGENT等)
-     * @param {number} options.leadingStsBegin 首状态起始值
-     * @param {number} options.leadingStsEnd 首状态结束值
-     * @param {string} options.startDate 开始日期
-     * @param {string} options.endDate 结束日期
-     * @param {number} options.pageSize 每页数量
-     */
-    async getB2CShipmentReport(options = {}) {
-        const {
-            warehouseCode = 'HF',
-            companyCode = null,
-            processType = 'NORMAL',
-            leadingStsBegin = null,
-            leadingStsEnd = null,
-            startDate = null,
-            endDate = null,
-            pageSize = 500
-        } = options;
-        
-        // 构建筛选条件
-        const filters = { and: [] };
-        
-        // 固定条件：B2C出库单
-        filters.and.push({
-            field: 'shipObjType',
-            operator: '=',
-            value: 'TO_C',
-            table: 'shipment_header'
-        });
-        
-        if (warehouseCode) {
-            filters.and.push({
-                field: 'shipment_header.warehouseCode',
-                operator: '=',
-                value: warehouseCode
-            });
-        }
-        
-        if (companyCode) {
-            filters.and.push({
-                field: 'shipment_header.companyCode',
-                operator: '=',
-                value: companyCode
-            });
-        }
-        
-        if (processType) {
-            filters.and.push({
-                field: 'shipment_header.processType',
-                operator: 'in',
-                disOperator: 'IN',
-                value: processType,
-                type: 'multiSelectCombobox'
-            });
-        }
-        
-        if (leadingStsBegin !== null) {
-            filters.and.push({
-                field: 'leadingSts:beg',
-                operator: '>=',
-                value: String(leadingStsBegin),
-                table: 'shipment_header'
-            });
-        }
-        
-        if (leadingStsEnd !== null) {
-            filters.and.push({
-                field: 'leadingSts:end',
-                operator: '<=',
-                value: String(leadingStsEnd),
-                table: 'shipment_header'
-            });
-        }
-        
-        if (startDate) {
-            filters.and.push({
-                field: 'shipment_header.created:beg',
-                operator: '>=',
-                value: startDate
-            });
-        }
-        
-        if (endDate) {
-            filters.and.push({
-                field: 'shipment_header.created:end',
-                operator: '<=',
-                value: endDate
-            });
-        }
-        
-        const filterJson = JSON.stringify(filters);
-        console.log(`查询条件: ${filterJson}`);
-        
-        // 定义返回字段
-        const resultFields = [
-            'id', 'created', 'frontTime', 'payTime', 'code', 'shipmentType',
-            'companyCode', 'carrierCode', 'processType', 'userDef1',
-            'sourceOrderCode', 'primaryWaybillCode', 'waveId', 'storeName',
-            'shipToState', 'shipToCity', 'qtyRatio', 'totalQty', 'totalLines',
-            'shipToAttentionTo', 'consolidated', 'warehouseTransferCode',
-            'leadingSts', 'trailingSts', 'uploadByAt', 'uploadByUser',
-            'rejectionNote', 'actualShipDateTime', 'uploadBatch', 'deliveryNote', 'userDef5'
-        ].join(',');
-        
-        // 分页获取数据
-        const allData = [];
-        let pageStart = 0;
-        
-        while (true) {
-            console.log(`获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
-            
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize, resultFields } = args;
-                
-                try {
-                    const path = '/rest/cbt/shipment_header';
-                    
-                    // 使用 dataManager.get 方法
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Bill': 'shipment_header',
-                                'X-Result-Fields': resultFields,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
-                        
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else {
-                                    resolve({ success: true, data: data });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize, resultFields });
-            
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-            
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-            
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
-            
-            if (batch.length < pageSize) {
-                break;
-            }
-            
-            pageStart += pageSize;
-            await this.page.waitForTimeout(500);
-        }
-        
-        console.log(`\n共获取 ${allData.length} 条记录`);
-        return allData;
-    }
-    
-    exportToCsv(data, filename = 'inbound_report.csv') {
-        if (!data || data.length === 0) {
-            console.log('没有数据可导出');
-            return;
-        }
-        
-        // 获取字段（排除__id）
-        const fields = Object.keys(data[0]).filter(k => k !== '__id');
-        
-        // 构建CSV内容
-        const header = fields.join(',');
-        const rows = data.map(record => {
-            return fields.map(field => {
-                let value = record[field];
-                if (value === null || value === undefined) {
-                    value = '';
-                }
-                // 转义引号和逗号
-                value = String(value).replace(/"/g, '""');
-                if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-                    value = `"${value}"`;
-                }
-                return value;
-            }).join(',');
-        });
-        
-        const csv = '\ufeff' + header + '\n' + rows.join('\n');  // BOM for Excel
-        fs.writeFileSync(filename, csv, 'utf8');
-        console.log(`已导出CSV: ${filename}`);
-    }
-    
-    exportToJson(data, filename = 'inbound_report.json') {
-        if (!data || data.length === 0) {
-            console.log('没有数据可导出');
-            return;
-        }
-        
-        fs.writeFileSync(filename, JSON.stringify(data, null, 2), 'utf8');
-        console.log(`已导出JSON: ${filename}`);
-    }
-    
-    async close() {
-        if (this.browser) {
-            await this.browser.close();
-        }
-    }
-}
-
 /**
  * 从环境变量获取配置
  */
@@ -520,14 +71,14 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型: inbound (入库明细), b2c_shipment (B2C出库单), all (全部)
-        reportType: process.env.REPORT_TYPE || 'all',
+        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), all (全部)
+        reportType: process.env.REPORT_TYPE || 'receipt_header',
         
         // 通用查询条件
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
         companyCode: process.env.TTX_COMPANY || 'HF-SPD',
-        startDate: process.env.TTX_START_DATE || null,  // 默认为本月1日
-        endDate: process.env.TTX_END_DATE || null,
+        startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
+        endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
         
         // 入库报表特有条件
         receiptTypes: process.env.TTX_RECEIPT_TYPES 
@@ -538,15 +89,84 @@ function getConfig() {
         processType: process.env.TTX_PROCESS_TYPE || 'NORMAL',
         leadingStsBegin: process.env.TTX_LEADING_STS_BEGIN ? parseInt(process.env.TTX_LEADING_STS_BEGIN, 10) : null,
         leadingStsEnd: process.env.TTX_LEADING_STS_END ? parseInt(process.env.TTX_LEADING_STS_END, 10) : null,
-        
+
+        // 入库单头部特有条件
+        checkinStartDate: process.env.TTX_CHECKIN_START_DATE || null,
+        checkinEndDate: process.env.TTX_CHECKIN_END_DATE || null,
+
         // 输出配置
         outputDir: process.env.OUTPUT_DIR || '.',
-        outputFormat: process.env.OUTPUT_FORMAT || 'both',  // csv, json, both
-        
+        outputFormat: process.env.OUTPUT_FORMAT || 'dataSource',  // csv, json, dataSource, both
+
         // 运行配置
         headless: process.env.HEADLESS !== 'false',
         pageSize: parseInt(process.env.PAGE_SIZE || '500', 10)
     };
+}
+
+/**
+ * 导出数据到 CSV 文件
+ * @param {Array} data 数据数组
+ * @param {string} filename 文件路径
+ */
+function exportToCsv(data, filename) {
+    if (!data || data.length === 0) {
+        console.log('没有数据可导出');
+        return;
+    }
+    
+    // 获取字段（排除__id）
+    const fields = Object.keys(data[0]).filter(k => k !== '__id');
+    
+    // 构建CSV内容
+    const header = fields.join(',');
+    const rows = data.map(record => {
+        return fields.map(field => {
+            let value = record[field];
+            if (value === null || value === undefined) {
+                value = '';
+            }
+            // 转义引号和逗号
+            value = String(value).replace(/"/g, '""');
+            if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+                value = `"${value}"`;
+            }
+            return value;
+        }).join(',');
+    });
+    
+    const csv = '\ufeff' + header + '\n' + rows.join('\n');  // BOM for Excel
+    fs.writeFileSync(filename, csv, 'utf8');
+    console.log(`已导出CSV: ${filename}`);
+}
+
+/**
+ * 导出数据到 JSON 文件
+ * @param {Array} data 数据数组
+ * @param {string} filename 文件路径
+ */
+function exportToJson(data, filename) {
+    if (!data || data.length === 0) {
+        console.log('没有数据可导出');
+        return;
+    }
+    
+    fs.writeFileSync(filename, JSON.stringify(data, null, 2), 'utf8');
+    console.log(`已导出JSON: ${filename}`);
+}
+
+/**
+ * 输出数据示例
+ * @param {Array} data 数据数组
+ */
+function printSampleData(data) {
+    console.log('\n--- 数据示例 ---');
+    const sample = data[0];
+    for (const [key, value] of Object.entries(sample)) {
+        if (key !== '__id') {
+            console.log(`  ${key}: ${value}`);
+        }
+    }
 }
 
 async function main() {
@@ -561,29 +181,85 @@ async function main() {
     console.log(`输出目录: ${config.outputDir}`);
     console.log('');
     
-    const exporter = new TTXExporter({
-        baseUrl: config.baseUrl,
-        customer: config.customer,
-        username: config.username,
-        password: config.password,
-        headless: config.headless
-    });
+    let browser = null;
     
     try {
-        await exporter.init();
+        // 启动浏览器
+        const chromePath = findChromePath();
+        console.log(`使用浏览器: ${chromePath}`);
+        console.log('启动浏览器...');
+
+        browser = await puppeteer.launch({
+            executablePath: chromePath,
+            headless: config.headless ? 'new' : false,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
         
-        const loggedIn = await exporter.login();
-        if (!loggedIn) {
-            console.error('登录失败，退出');
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1920, height: 1080 });
+        
+        // 登录
+        console.log(`访问: ${config.baseUrl}`);
+        const url = `${config.baseUrl}/index.html?customer=${config.customer}&lang=zh`;
+        await page.goto(url, { waitUntil: 'networkidle2' });
+        await page.waitForTimeout(3000);
+        
+        // 查找登录iframe
+        const frames = page.frames();
+        let loginFrame = null;
+        
+        for (const frame of frames) {
+            if (frame.url().includes('loginPage')) {
+                loginFrame = frame;
+                break;
+            }
+        }
+        
+        if (loginFrame) {
+            console.log(`正在登录: ${config.username}`);
+            await loginFrame.waitForSelector('#username', { timeout: 10000 });
+            await loginFrame.type('#username', config.username);
+            await loginFrame.type('#password', config.password);
+            await loginFrame.click('.login_btn');
+            console.log('等待登录完成...');
+            await page.waitForTimeout(8000);
+        } else {
+            console.log('未找到登录iframe，可能已经登录');
+        }
+        
+        // 检查登录状态
+        let sessionInfo = { success: false };
+        for (let i = 0; i < 5; i++) {
+            sessionInfo = await page.evaluate(() => {
+                if (window.app && window.app.session && window.app.session.token) {
+                    return {
+                        success: true,
+                        userName: window.app.session.userName,
+                        token: window.app.session.token
+                    };
+                }
+                return { success: false };
+            });
+            
+            if (sessionInfo.success) {
+                break;
+            }
+            console.log(`等待session初始化... (${i + 1}/5)`);
+            await page.waitForTimeout(2000);
+        }
+        
+        if (!sessionInfo.success) {
+            console.error('登录失败');
             process.exit(1);
         }
+        console.log(`登录成功: ${sessionInfo.userName}`);
         
         // 确保输出目录存在
         if (!fs.existsSync(config.outputDir)) {
             fs.mkdirSync(config.outputDir, { recursive: true });
         }
         
-        // 设置默认开始日期（本月1日）
+        // 设置默认开始日期
         let startDate = config.startDate;
         if (!startDate) {
             const today = new Date();
@@ -594,11 +270,49 @@ async function main() {
         // 根据报表类型导出
         const reportType = config.reportType.toLowerCase();
         
-        // 导出入库明细报表
-        if (reportType === 'inbound' || reportType === 'all') {
-            console.log('\n========== 入库明细报表 ==========\n');
+        // 导出入库单头部
+        if (reportType === 'receipt_header' || reportType === 'all') {
+            console.log('\n========== 入库单头部 ==========\n');
             
-            const inboundData = await exporter.getInboundReport({
+            const exporter = new ReceiptHeaderExporter({ page });
+            
+            const data = await exporter.getReport({
+                warehouseCode: config.warehouseCode,
+                companyCode: config.companyCode,
+                startDate: startDate,
+                endDate: config.endDate,
+                checkinStartDate: config.checkinStartDate,
+                checkinEndDate: config.checkinEndDate,
+                pageSize: config.pageSize
+            });
+            
+            if (data.length > 0) {
+                const csvPath = path.join(config.outputDir, 'receipt_header_report.csv');
+                const jsonPath = path.join(config.outputDir, 'receipt_header_report.json');
+                
+                if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
+                    exportToCsv(data, csvPath);
+                }
+                if (config.outputFormat === 'json' || config.outputFormat === 'both') {
+                    exportToJson(data, jsonPath);
+                }
+                if (config.outputFormat === 'dataSource' || config.outputFormat === 'both') {
+                    await exporter.exportToDataSource(data);
+                }
+                
+                printSampleData(data);
+            } else {
+                console.log('未获取到入库单头部数据');
+            }
+        }
+        
+        // 导出入库单明细
+        if (reportType === 'receipt_details' || reportType === 'all') {
+            console.log('\n========== 入库单明细报表 ==========\n');
+            
+            const exporter = new ReceiptDetailsExporter({ page });
+            
+            const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
                 companyCode: config.companyCode,
                 receiptTypes: config.receiptTypes,
@@ -607,26 +321,23 @@ async function main() {
                 pageSize: config.pageSize
             });
             
-            if (inboundData.length > 0) {
-                const csvPath = path.join(config.outputDir, 'inbound_report.csv');
-                const jsonPath = path.join(config.outputDir, 'inbound_report.json');
+            if (data.length > 0) {
+                const csvPath = path.join(config.outputDir, 'receipt_details_report.csv');
+                const jsonPath = path.join(config.outputDir, 'receipt_details_report.json');
                 
                 if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
-                    exporter.exportToCsv(inboundData, csvPath);
+                    exportToCsv(data, csvPath);
                 }
                 if (config.outputFormat === 'json' || config.outputFormat === 'both') {
-                    exporter.exportToJson(inboundData, jsonPath);
+                    exportToJson(data, jsonPath);
+                }
+                if (config.outputFormat === 'dataSource' || config.outputFormat === 'both') {
+                    await exporter.exportToDataSource(data);
                 }
                 
-                console.log('\n--- 数据示例 ---');
-                const sample = inboundData[0];
-                for (const [key, value] of Object.entries(sample)) {
-                    if (key !== '__id') {
-                        console.log(`  ${key}: ${value}`);
-                    }
-                }
+                printSampleData(data);
             } else {
-                console.log('未获取到入库数据');
+                console.log('未获取到入库单明细数据');
             }
         }
         
@@ -634,7 +345,9 @@ async function main() {
         if (reportType === 'b2c_shipment' || reportType === 'all') {
             console.log('\n========== B2C出库单 ==========\n');
             
-            const shipmentData = await exporter.getB2CShipmentReport({
+            const exporter = new B2CShipmentExporter({ page });
+            
+            const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
                 companyCode: config.companyCode,
                 processType: config.processType,
@@ -645,24 +358,21 @@ async function main() {
                 pageSize: config.pageSize
             });
             
-            if (shipmentData.length > 0) {
+            if (data.length > 0) {
                 const csvPath = path.join(config.outputDir, 'b2c_shipment_report.csv');
                 const jsonPath = path.join(config.outputDir, 'b2c_shipment_report.json');
                 
                 if (config.outputFormat === 'csv' || config.outputFormat === 'both') {
-                    exporter.exportToCsv(shipmentData, csvPath);
+                    exportToCsv(data, csvPath);
                 }
                 if (config.outputFormat === 'json' || config.outputFormat === 'both') {
-                    exporter.exportToJson(shipmentData, jsonPath);
+                    exportToJson(data, jsonPath);
+                }
+                if (config.outputFormat === 'dataSource' || config.outputFormat === 'both') {
+                    await exporter.exportToDataSource(data);
                 }
                 
-                console.log('\n--- 数据示例 ---');
-                const sample = shipmentData[0];
-                for (const [key, value] of Object.entries(sample)) {
-                    if (key !== '__id') {
-                        console.log(`  ${key}: ${value}`);
-                    }
-                }
+                printSampleData(data);
             } else {
                 console.log('未获取到B2C出库单数据');
             }
@@ -673,7 +383,9 @@ async function main() {
         console.error('错误:', error);
         process.exit(1);
     } finally {
-        await exporter.close();
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
@@ -682,4 +394,4 @@ if (require.main === module) {
     main().catch(console.error);
 }
 
-module.exports = { TTXExporter };
+module.exports = { main };

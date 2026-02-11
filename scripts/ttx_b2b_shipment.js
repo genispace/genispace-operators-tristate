@@ -67,8 +67,8 @@ class B2BShipmentExporter {
             warehouseCode = 'HF',
             companyCode = null,
             processType = 'NORMAL',
-            leadingStsBegin = null,
-            leadingStsEnd = null,
+            leadingStsBegin = 100,
+            leadingStsEnd = 100,
             startDate = null,
             endDate = null,
             pageSize = 500
@@ -78,30 +78,17 @@ class B2BShipmentExporter {
             throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
         }
 
-        // 构建筛选条件
+        // 构建筛选条件（与curl条件顺序一致）
         const filters = { and: [] };
-
-        // 固定条件：B2B出库单
-        filters.and.push({
-            field: 'shipObjType',
-            operator: '=',
-            value: 'TO_B',
-            table: 'shipment_header'
-        });
-
-        if (warehouseCode) {
-            filters.and.push({
-                field: 'shipment_header.warehouseCode',
-                operator: '=',
-                value: warehouseCode
-            });
-        }
 
         if (companyCode) {
             filters.and.push({
                 field: 'shipment_header.companyCode',
-                operator: '=',
-                value: companyCode
+                operator: 'in',
+                disOperator: 'IN',
+                value: companyCode,
+                disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder',
+                type: 'multiSelectCombobox'
             });
         }
 
@@ -115,23 +102,19 @@ class B2BShipmentExporter {
             });
         }
 
-        if (leadingStsBegin !== null) {
-            filters.and.push({
-                field: 'leadingSts:beg',
-                operator: '>=',
-                value: String(leadingStsBegin),
-                table: 'shipment_header'
-            });
-        }
-
-        if (leadingStsEnd !== null) {
-            filters.and.push({
-                field: 'leadingSts:end',
-                operator: '<=',
-                value: String(leadingStsEnd),
-                table: 'shipment_header'
-            });
-        }
+        // leadingSts 条件始终添加（默认值100）
+        filters.and.push({
+            field: 'leadingSts:beg',
+            operator: '>=',
+            value: String(leadingStsBegin),
+            table: 'shipment_header'
+        });
+        filters.and.push({
+            field: 'leadingSts:end',
+            operator: '<=',
+            value: String(leadingStsEnd),
+            table: 'shipment_header'
+        });
 
         if (startDate) {
             filters.and.push({
@@ -148,6 +131,22 @@ class B2BShipmentExporter {
                 value: endDate
             });
         }
+
+        if (warehouseCode) {
+            filters.and.push({
+                field: 'shipment_header.warehouseCode',
+                operator: '=',
+                value: warehouseCode
+            });
+        }
+
+        // 固定条件：B2B出库单
+        filters.and.push({
+            field: 'shipObjType',
+            operator: '=',
+            value: 'TO_B',
+            table: 'shipment_header'
+        });
 
         const filterJson = JSON.stringify(filters);
         console.log(`B2B出库单查询条件: ${filterJson}`);
@@ -306,7 +305,7 @@ class B2BShipmentExporter {
                 if (response.ok) {
                     successCount++;
                     if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} 条记录...`);
+                        console.log(`  已插入 ${successCount} / ${maskedRecords.length} 条记录...`);
                     }
                 } else {
                     failCount++;

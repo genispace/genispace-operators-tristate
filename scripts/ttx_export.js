@@ -78,8 +78,6 @@ function getConfig() {
         
         // 通用查询条件
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
-        companyCode: process.env.TTX_COMPANY || 'HF-SPD',
-        companyCodes: process.env.TTX_COMPANY_CODES || null,  // 货主代码列表（逗号分隔），用于拣货明细等多货主筛选
         startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
         endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
         
@@ -281,7 +279,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 startDate: startDate,
                 endDate: config.endDate,
                 checkinStartDate: config.checkinStartDate,
@@ -317,7 +315,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 receiptTypes: config.receiptTypes,
                 startDate: startDate,
                 endDate: config.endDate,
@@ -352,7 +350,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 processType: config.processType,
                 leadingStsBegin: config.leadingStsBegin,
                 leadingStsEnd: config.leadingStsEnd,
@@ -389,10 +387,8 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 processType: config.processType,
-                leadingStsBegin: config.leadingStsBegin,
-                leadingStsEnd: config.leadingStsEnd,
                 startDate: startDate,
                 endDate: config.endDate,
                 pageSize: config.pageSize
@@ -427,7 +423,7 @@ async function main() {
             const data = await exporter.getReport({
                 startDate: startDate,
                 endDate: config.endDate,
-                companyCodes: config.companyCodes,
+                companyCodes: 'HF-RB,HF-NDK,HF-SPD',
                 pageSize: config.pageSize
             });
             

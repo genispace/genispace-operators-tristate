@@ -257,7 +257,7 @@ class B2CPakingDetailsExporter {
                 if (response.ok) {
                     successCount++;
                     if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} 条记录...`);
+                        console.log(`  已插入 ${successCount} / ${maskedRecords.length} 条记录...`);
                     }
                 } else {
                     failCount++;

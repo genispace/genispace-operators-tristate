@@ -248,13 +248,30 @@ async function main() {
             console.log(`等待session初始化... (${i + 1}/5)`);
             await page.waitForTimeout(2000);
         }
-        
+
         if (!sessionInfo.success) {
             console.error('登录失败');
             process.exit(1);
         }
         console.log(`登录成功: ${sessionInfo.userName}`);
-        
+
+        // 等待页面主框架完全加载
+        console.log('等待页面主框架加载...');
+        try {
+            await page.waitForFunction('document.readyState === "complete"', {
+                timeout: 30000
+            });
+            console.log('页面主框架已加载');
+        } catch (e) {
+            console.warn('等待页面主框架超时，继续执行...');
+        }
+
+        // 额外等待确保页面完全就绪
+        await page.waitForTimeout(3000);
+
+        // 确保主框架可用
+        await page.mainFrame(); // 这会抛出异常如果主框架还没准备好
+
         // 确保输出目录存在
         if (!fs.existsSync(config.outputDir)) {
             fs.mkdirSync(config.outputDir, { recursive: true });

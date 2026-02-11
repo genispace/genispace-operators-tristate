@@ -26,6 +26,7 @@ const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
 const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
 const { B2CPakingDetailsExporter } = require('./ttx_b2c_paking_details');
+const { DataSyncExporter } = require('./ttx_data_sync');
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -73,7 +74,7 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), paking_details (B2C拣货明细), all (全部)
+        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), paking_details (B2C拣货明细), data_sync (数据同步), all (全部)
         reportType: process.env.REPORT_TYPE || 'receipt_header',
         
         // 通用查询条件
@@ -172,18 +173,37 @@ function printSampleData(data) {
 
 async function main() {
     const config = getConfig();
-    
+
     console.log('=== 通天晓WMS数据导出 ===');
     console.log(`目标: ${config.baseUrl}`);
     console.log(`租户: ${config.customer}`);
-    console.log(`用户: ${config.username}`);
     console.log(`仓库: ${config.warehouseCode}`);
     console.log(`报表类型: ${config.reportType}`);
     console.log(`输出目录: ${config.outputDir}`);
     console.log('');
-    
+
+    // 数据同步模式：无需登录通天晓系统
+    if (config.reportType.toLowerCase() === 'data_sync') {
+        console.log('========== 数据同步到Genespace ==========\n');
+
+        const exporter = new DataSyncExporter();
+        const result = await exporter.syncAll();
+
+        if (result.failed > 0) {
+            console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);
+        } else {
+            console.log('\n所有数据源同步成功');
+        }
+
+        console.log('\n=== 数据同步完成 ===');
+        return;
+    }
+
+    // 报表导出模式：需要登录通天晓系统
+    console.log(`用户: ${config.username}`);
+
     let browser = null;
-    
+
     try {
         // 启动浏览器
         const chromePath = findChromePath();
@@ -463,7 +483,22 @@ async function main() {
                 console.log('未获取到B2C拣货明细数据');
             }
         }
-        
+
+        // 数据同步到Genespace
+        if (reportType === 'all') {
+            console.log('\n========== 数据同步到Genespace ==========\n');
+
+            const exporter = new DataSyncExporter();
+
+            const result = await exporter.syncAll();
+
+            if (result.failed > 0) {
+                console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);
+            } else {
+                console.log('\n所有数据源同步成功');
+            }
+        }
+
         console.log('\n=== 导出完成 ===');
     } catch (error) {
         console.error('错误:', error);

@@ -26,6 +26,7 @@ const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
 const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
 const { B2CPakingDetailsExporter } = require('./ttx_b2c_paking_details');
+const { DataSyncExporter } = require('./ttx_data_sync');
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -73,13 +74,11 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), paking_details (B2C拣货明细), all (全部)
+        // 报表类型: receipt_header (入库单头部), receipt_details (入库单明细), b2c_shipment (B2C出库单), b2b_shipment (B2B出库单), paking_details (B2C拣货明细), data_sync (数据同步), all (全部)
         reportType: process.env.REPORT_TYPE || 'receipt_header',
         
         // 通用查询条件
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
-        companyCode: process.env.TTX_COMPANY || 'HF-SPD',
-        companyCodes: process.env.TTX_COMPANY_CODES || null,  // 货主代码列表（逗号分隔），用于拣货明细等多货主筛选
         startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
         endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
         
@@ -174,18 +173,37 @@ function printSampleData(data) {
 
 async function main() {
     const config = getConfig();
-    
+
     console.log('=== 通天晓WMS数据导出 ===');
     console.log(`目标: ${config.baseUrl}`);
     console.log(`租户: ${config.customer}`);
-    console.log(`用户: ${config.username}`);
     console.log(`仓库: ${config.warehouseCode}`);
     console.log(`报表类型: ${config.reportType}`);
     console.log(`输出目录: ${config.outputDir}`);
     console.log('');
-    
+
+    // 数据同步模式：无需登录通天晓系统
+    if (config.reportType.toLowerCase() === 'data_sync') {
+        console.log('========== 数据同步到Genespace ==========\n');
+
+        const exporter = new DataSyncExporter();
+        const result = await exporter.syncAll();
+
+        if (result.failed > 0) {
+            console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);
+        } else {
+            console.log('\n所有数据源同步成功');
+        }
+
+        console.log('\n=== 数据同步完成 ===');
+        return;
+    }
+
+    // 报表导出模式：需要登录通天晓系统
+    console.log(`用户: ${config.username}`);
+
     let browser = null;
-    
+
     try {
         // 启动浏览器
         const chromePath = findChromePath();
@@ -250,13 +268,30 @@ async function main() {
             console.log(`等待session初始化... (${i + 1}/5)`);
             await page.waitForTimeout(2000);
         }
-        
+
         if (!sessionInfo.success) {
             console.error('登录失败');
             process.exit(1);
         }
         console.log(`登录成功: ${sessionInfo.userName}`);
-        
+
+        // 等待页面主框架完全加载
+        console.log('等待页面主框架加载...');
+        try {
+            await page.waitForFunction('document.readyState === "complete"', {
+                timeout: 30000
+            });
+            console.log('页面主框架已加载');
+        } catch (e) {
+            console.warn('等待页面主框架超时，继续执行...');
+        }
+
+        // 额外等待确保页面完全就绪
+        await page.waitForTimeout(3000);
+
+        // 确保主框架可用
+        await page.mainFrame(); // 这会抛出异常如果主框架还没准备好
+
         // 确保输出目录存在
         if (!fs.existsSync(config.outputDir)) {
             fs.mkdirSync(config.outputDir, { recursive: true });
@@ -281,7 +316,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 startDate: startDate,
                 endDate: config.endDate,
                 checkinStartDate: config.checkinStartDate,
@@ -317,7 +352,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 receiptTypes: config.receiptTypes,
                 startDate: startDate,
                 endDate: config.endDate,
@@ -352,7 +387,7 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 processType: config.processType,
                 leadingStsBegin: config.leadingStsBegin,
                 leadingStsEnd: config.leadingStsEnd,
@@ -389,10 +424,8 @@ async function main() {
             
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
-                companyCode: config.companyCode,
+                companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 processType: config.processType,
-                leadingStsBegin: config.leadingStsBegin,
-                leadingStsEnd: config.leadingStsEnd,
                 startDate: startDate,
                 endDate: config.endDate,
                 pageSize: config.pageSize
@@ -427,7 +460,7 @@ async function main() {
             const data = await exporter.getReport({
                 startDate: startDate,
                 endDate: config.endDate,
-                companyCodes: config.companyCodes,
+                companyCodes: 'HF-RB,HF-NDK,HF-SPD',
                 pageSize: config.pageSize
             });
             
@@ -450,7 +483,22 @@ async function main() {
                 console.log('未获取到B2C拣货明细数据');
             }
         }
-        
+
+        // 数据同步到Genespace
+        if (reportType === 'all') {
+            console.log('\n========== 数据同步到Genespace ==========\n');
+
+            const exporter = new DataSyncExporter();
+
+            const result = await exporter.syncAll();
+
+            if (result.failed > 0) {
+                console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);
+            } else {
+                console.log('\n所有数据源同步成功');
+            }
+        }
+
         console.log('\n=== 导出完成 ===');
     } catch (error) {
         console.error('错误:', error);

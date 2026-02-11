@@ -92,8 +92,11 @@ class ReceiptHeaderExporter {
         if (companyCode) {
             filters.and.push({
                 field: 'receipt_header.companyCode',
-                operator: '=',
-                value: companyCode
+                operator: 'in',
+                disOperator: 'IN',
+                value: companyCode,
+                disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder',
+                type: 'multiSelectCombobox'
             });
         }
 
@@ -252,7 +255,7 @@ class ReceiptHeaderExporter {
                 if (response.ok) {
                     successCount++;
                     if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} 条记录...`);
+                        console.log(`  已插入 ${successCount} / ${records.length} 条记录...`);
                     }
                 } else {
                     failCount++;

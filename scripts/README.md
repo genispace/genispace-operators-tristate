@@ -50,7 +50,7 @@ node ttx_export.js
 cd operators-tristate/scripts
 
 # 构建镜像
-docker build -t ttx-export .
+docker build -t magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest .
 
 # 运行（使用环境变量配置）
 docker run --rm \
@@ -59,7 +59,7 @@ docker run --rm \
   -e TTX_WAREHOUSE=HF \
   -e TTX_COMPANY=HF-SPD \
   -v $(pwd)/output:/app/output \
-  ttx-export
+  magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
 
 # 或者使用 docker-compose
 docker-compose up --build
@@ -82,11 +82,10 @@ docker-compose up --build
 
 ```bash
 # 构建镜像
-docker build -t ttx-export .
+docker build -t magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest .
 
-# 推送到私有仓库（可选）
-docker tag ttx-export your-registry/ttx-export:latest
-docker push your-registry/ttx-export:latest
+# 推送到私有仓库
+docker push magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
 ```
 
 ### 环境变量
@@ -167,8 +166,8 @@ spec:
       template:
         spec:
           containers:
-          - name: ttx-export
-            image: ttx-export:latest
+          - name: script-tristate-ttx-export
+            image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
             env:
             - name: TTX_USERNAME
               valueFrom:
@@ -201,8 +200,8 @@ spec:
 ```yaml
 version: '3.8'
 services:
-  ttx-export:
-    image: ttx-export:latest
+  script-tristate-ttx-export:
+    image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
     environment:
       - TTX_USERNAME=${TTX_USERNAME}
       - TTX_PASSWORD=${TTX_PASSWORD}

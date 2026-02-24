@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  ttx-export:
+  script-tristate-ttx-export:
     build: .
-    image: ttx-export:latest
-    container_name: ttx-export
+    image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
+    container_name: script-tristate-ttx-export
     
     # 环境变量配置
     environment:

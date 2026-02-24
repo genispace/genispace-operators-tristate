@@ -1,14 +1,16 @@
 {
   "name": "ttx-export",
-  "version": "1.0.0",
-  "description": "通天晓WMS数据导出工具",
+  "version": "2.0.0",
+  "description": "通天晓WMS数据导出工具（支持模块化和.env配置）",
   "main": "ttx_export.js",
   "scripts": {
     "export": "node ttx_export.js",
-    "export:visible": "HEADLESS=false node ttx_export.js"
+    "export:visible": "HEADLESS=false node ttx_export.js",
+    "install:deps": "npm install puppeteer-core dotenv"
   },
   "dependencies": {
-    "puppeteer-core": "^21.0.0"
+    "puppeteer-core": "^21.0.0",
+    "dotenv": "^16.3.0"
   },
   "author": "",
   "license": "MIT"

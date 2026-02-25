@@ -21,7 +21,7 @@
 
 require('dotenv').config();
 
-const { syncDataSourceData, insertDataSourceData } = require('../src/services/datasource-service');
+const { syncDataSourceData } = require('../src/services/datasource-service');
 const { execSync } = require('child_process');
 const path = require('path');
 

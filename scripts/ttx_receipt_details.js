@@ -187,8 +187,8 @@ class ReceiptDetailsExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        const { insertDataSourceData } = require('../src/services/datasource-service');
-        await insertDataSourceData('c2306183-f7c2-4a56-bc8f-59c37882afca', records, {
+        const { insertDataToDataSource } = require('../src/services/datasource-service');
+        await insertDataToDataSource('c2306183-f7c2-4a56-bc8f-59c37882afca', records, {
             logPrefix: '入库单明细'
         });
     }

@@ -267,11 +267,11 @@ class B2BShipmentExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        const { insertDataSourceData } = require('../src/services/datasource-service');
+        const { insertDataToDataSource } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
         console.log('\n--- 脱敏后的数据 ---');
         console.log(JSON.stringify(maskedRecords[0], null, 2));
-        await insertDataSourceData('809a7e42-6f79-4a82-b776-2734a7076f25', maskedRecords, {
+        await insertDataToDataSource('809a7e42-6f79-4a82-b776-2734a7076f25', maskedRecords, {
             logPrefix: 'B2B出库单'
         });
     }

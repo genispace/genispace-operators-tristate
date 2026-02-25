@@ -89,6 +89,93 @@ async function insertDataSourceData(datasourceId, records, options = {}) {
 }
 
 /**
+ * 批量插入数据到数据源
+ * 一次 POST 发送 { data: records }，要求数据源类型为 BATCH_INSERT
+ *
+ * @param {string} datasourceId - 数据源 ID (UUID)，须为 BATCH_INSERT 类型
+ * @param {Array<Object>} records - 要插入的数据记录数组
+ * @param {Object} options - 可选配置
+ * @param {string} options.logPrefix - 日志前缀 (如 '入库单头部')
+ * @param {string} options.apiToken - API Token，默认从环境变量读取
+ * @param {string} options.baseUrl - API 基础 URL，默认从环境变量读取
+ * @returns {Promise<{success: boolean, successCount: number, failCount: number, affectedRows?: number}>}
+ */
+async function batchInsertDataSourceData(datasourceId, records, options = {}) {
+    const {
+        logPrefix = '数据',
+        apiToken = API_TOKEN,
+        baseUrl = BASE_URL
+    } = options;
+
+    if (!records || records.length === 0) {
+        console.log('没有数据需要插入');
+        return { success: true, successCount: 0, failCount: 0 };
+    }
+
+    const apiUrl = `${baseUrl}/datasources/${datasourceId}/data`;
+
+    console.log(`\n开始批量插入${logPrefix}数据到 API，共 ${records.length} 条记录...`);
+    console.log(`API URL: ${apiUrl}`);
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiToken}`
+            },
+            body: JSON.stringify({ data: records })
+        });
+
+        if (response.ok) {
+            const resultData = await response.json();
+            const affectedRows = resultData?.data?.affectedRows ?? 0;
+            console.log(`✓ ${logPrefix} 批量插入成功`);
+            console.log(`  - 影响行数: ${affectedRows}`);
+            return {
+                success: true,
+                successCount: records.length,
+                failCount: 0,
+                affectedRows
+            };
+        } else {
+            const errorText = await response.text();
+            console.error(`✗ ${logPrefix} 批量插入失败: ${response.status} ${response.statusText}`);
+            console.error(`错误详情: ${errorText}`);
+            return {
+                success: false,
+                successCount: 0,
+                failCount: records.length
+            };
+        }
+    } catch (error) {
+        console.error(`✗ ${logPrefix} 批量插入异常: ${error.message}`);
+        return {
+            success: false,
+            successCount: 0,
+            failCount: records.length
+        };
+    }
+}
+
+/**
+ * 根据配置选择插入方式并执行
+ * 环境变量 TTX_USE_BATCH_INSERT 为 true 时使用批量插入，否则使用单条插入
+ *
+ * @param {string} datasourceId - 数据源 ID (UUID)
+ * @param {Array<Object>} records - 要插入的数据记录数组
+ * @param {Object} options - 可选配置，同 insertDataSourceData / batchInsertDataSourceData
+ * @returns {Promise<{successCount: number, failCount: number, ...}>}
+ */
+async function insertDataToDataSource(datasourceId, records, options = {}) {
+    const useBatchInsert = process.env.TTX_USE_BATCH_INSERT === 'true' || process.env.TTX_USE_BATCH_INSERT === '1';
+    if (useBatchInsert) {
+        return batchInsertDataSourceData(datasourceId, records, options);
+    }
+    return insertDataSourceData(datasourceId, records, options);
+}
+
+/**
  * 同步数据源
  * 发送固定 body { d: 'x' } 触发数据源同步
  *
@@ -164,5 +251,7 @@ async function syncDataSourceData(datasourceId, options = {}) {
 
 module.exports = {
     insertDataSourceData,
+    batchInsertDataSourceData,
+    insertDataToDataSource,
     syncDataSourceData
 };

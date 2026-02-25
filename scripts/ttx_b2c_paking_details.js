@@ -215,13 +215,13 @@ class B2CPakingDetailsExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        const { insertDataSourceData } = require('../src/services/datasource-service');
+        const { insertDataToDataSource } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
         console.log('\n--- 脱敏后的数据 ---');
         if (maskedRecords[0]) {
             console.log(JSON.stringify(maskedRecords[0], null, 2));
         }
-        await insertDataSourceData('da65089e-0772-465c-b034-06956304c373', maskedRecords, {
+        await insertDataToDataSource('da65089e-0772-465c-b034-06956304c373', maskedRecords, {
             logPrefix: 'B2C拣货明细'
         });
     }

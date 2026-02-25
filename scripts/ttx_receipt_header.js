@@ -222,8 +222,8 @@ class ReceiptHeaderExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        const { insertDataSourceData } = require('../src/services/datasource-service');
-        await insertDataSourceData('ace5c767-4bce-4da0-b46b-e36e9af365a1', records, {
+        const { insertDataToDataSource } = require('../src/services/datasource-service');
+        await insertDataToDataSource('ace5c767-4bce-4da0-b46b-e36e9af365a1', records, {
             logPrefix: '入库单头部'
         });
     }

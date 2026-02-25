@@ -17,6 +17,28 @@ npm install puppeteer-core dotenv
 ### 2. 配置环境变量
 
 ```bash
+cd operators-tristate/scripts
+
+# 构建镜像
+docker build -t magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest .
+
+# 运行（使用环境变量配置）
+docker run --rm \
+  -e TTX_USERNAME=HFLS17 \
+  -e TTX_PASSWORD=Xyy1234567 \
+  -e TTX_WAREHOUSE=HF \
+  -e TTX_COMPANY=HF-SPD \
+  -v $(pwd)/output:/app/output \
+  magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
+
+# 或者使用 docker-compose
+docker-compose up --build
+```
+
+**优点**：
+- 无需本地安装 Chrome
+- 可在无图形界面的服务器上运行
+- 适合 CI/CD 和 Kubernetes CronJob
 # 复制配置模板
 cp .env.example .env
 
@@ -27,6 +49,140 @@ vim .env
 ### 3. 运行导出
 
 ```bash
+# 构建镜像
+docker build -t magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest .
+
+# 推送到私有仓库
+docker push magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
+```
+
+### 环境变量
+
+#### 连接配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TTX_BASE_URL` | 服务地址 | `https://ttx.56xyy.com` |
+| `TTX_CUSTOMER` | 租户ID | `xyy-wms-prod` |
+| `TTX_USERNAME` | 用户名 | - |
+| `TTX_PASSWORD` | 密码 | - |
+
+#### 报表选择
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `REPORT_TYPE` | 报表类型 | `all` |
+
+可选值：
+- `inbound` - 仅导出入库明细报表
+- `b2c_shipment` - 仅导出B2C出库单
+- `all` - 导出全部报表
+
+#### 通用查询条件
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TTX_WAREHOUSE` | 仓库代码 | `HF` |
+| `TTX_COMPANY` | 货主代码 | `HF-SPD` |
+| `TTX_START_DATE` | 开始日期（格式：YYYY-MM-DD HH:mm:ss） | 本月1日 |
+| `TTX_END_DATE` | 结束日期 | - |
+
+#### 入库报表特有条件
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TTX_RECEIPT_TYPES` | 入库类型（逗号分隔） | `CGRK,DBRK,THRK,QTRK,B2BRK,HHRK` |
+
+#### B2C出库单特有条件
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `TTX_PROCESS_TYPE` | 处理类型 | `NORMAL` |
+| `TTX_LEADING_STS_BEGIN` | 首状态起始值 | - |
+| `TTX_LEADING_STS_END` | 首状态结束值 | - |
+
+**首状态值说明**：
+| 值 | 含义 |
+|-----|------|
+| 100 | 待处理 |
+| 200 | 已分配 |
+| 300 | 已拣货 |
+| 400 | 已复核 |
+| 500 | 已打包 |
+| 900 | 已发货 |
+
+#### 输出配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `OUTPUT_DIR` | 输出目录 | `/app/output` |
+| `OUTPUT_FORMAT` | 输出格式 | `both` (csv/json/both) |
+| `HEADLESS` | 无头模式 | `true` |
+| `PAGE_SIZE` | 每批数量 | `500` |
+
+### Kubernetes CronJob 示例
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ttx-inbound-report
+spec:
+  schedule: "0 6 * * *"  # 每天早上6点执行
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: script-tristate-ttx-export
+            image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
+            env:
+            - name: TTX_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ttx-credentials
+                  key: username
+            - name: TTX_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ttx-credentials
+                  key: password
+            - name: TTX_WAREHOUSE
+              value: "HF"
+            - name: TTX_COMPANY
+              value: "HF-SPD"
+            - name: OUTPUT_DIR
+              value: "/app/output"
+            volumeMounts:
+            - name: output
+              mountPath: /app/output
+          volumes:
+          - name: output
+            persistentVolumeClaim:
+              claimName: ttx-output-pvc
+          restartPolicy: OnFailure
+```
+
+### Docker Compose 生产配置
+
+```yaml
+version: '3.8'
+services:
+  script-tristate-ttx-export:
+    image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
+    environment:
+      - TTX_USERNAME=${TTX_USERNAME}
+      - TTX_PASSWORD=${TTX_PASSWORD}
+      - TTX_WAREHOUSE=HF
+      - TTX_COMPANY=HF-SPD
+    volumes:
+      - ./output:/app/output
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
 # 运行报表导出
 node ttx_export.js
 

@@ -60,10 +60,11 @@ class B2CPakingDetailsExporter {
      * @param {number} options.pageSize 每页数量
      */
     async getReport(options = {}) {
+        // 硬编码：货主代码 HF-RB Reebok, HF-NDK Nautica, HF-SPD Spyder
         const {
             startDate = null,
             endDate = null,
-            companyCodes = null,
+            companyCodes = 'HF-RB,HF-NDK,HF-SPD',
             pageSize = 100
         } = options;
 

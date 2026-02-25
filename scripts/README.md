@@ -32,6 +32,10 @@ node ttx_export.js
 
 # 或者单独执行数据同步（无需登录通天晓系统）
 node ttx_data_sync.js
+
+# 分步调试（TTX_SYNC_STEP=1 仅删除镜像表，=2 仅导出入库等）
+TTX_SYNC_STEP=1 node ttx_data_sync.js
+TTX_SYNC_STEP=1,3,4 node ttx_data_sync.js
 ```
 
 ## 项目结构
@@ -123,11 +127,23 @@ GENISPCE_API_TOKEN=q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx
 
 ### ttx_data_sync.js（数据同步模块）
 
-提供：
-- `syncAll()` - 同步所有数据源到Genespace
-- `syncDataSource()` - 同步单个数据源
+实现《通天晓数据同步步骤》5 个步骤，支持分步执行：
 
-同步的数据源：
+| 步骤 | 说明 | 方法 |
+|-----|------|------|
+| 1 | 删除镜像表（清空当次数据） | syncDataSourceData |
+| 2 | 通天晓导出 → 镜像表 | 调用 ttx_export.js |
+| 3 | 镜像表 → 临时表 (UPSERT) | syncDataSourceData |
+| 4 | 临时表 → 职能表 | syncDataSourceData |
+| 5 | 临时表清理 | 占位，待配置数据源ID |
+
+**分步执行**：通过 `TTX_SYNC_STEP=1` 或 `1,3,4` 指定要执行的步骤。
+
+提供：
+- `syncTempToData()` - 同步临时表到职能表（步骤4）
+- `syncDataSource()` - 同步单个职能表数据源
+
+职能表数据源：
 | 键名 | 名称 | 数据源ID |
 |------|------|----------|
 | purchase_inbound_in_transit | 采购入库在途 | 9c13a06a-2f2f-40d6-b258-ea5a360af918 |
@@ -252,15 +268,15 @@ node ttx_data_sync.js
 ### 在代码中调用数据同步
 
 ```javascript
-const { DataSyncExporter, syncAll } = require('./ttx_data_sync');
+const { DataSyncExporter, syncTempToData } = require('./ttx_data_sync');
 
 // 方式1: 使用类实例
 const exporter = new DataSyncExporter();
-const result = await exporter.syncAll();
+const result = await exporter.syncTempToData();
 console.log(`成功: ${result.success}, 失败: ${result.failed}`);
 
 // 方式2: 使用便捷函数
-const result = await syncAll(['purchase_inbound_in_transit', 'b2b_orders']);
+const result = await syncTempToData(['purchase_inbound_in_transit', 'b2b_orders']);
 // 只同步指定的数据源
 ```
 

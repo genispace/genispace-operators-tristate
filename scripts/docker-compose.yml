@@ -23,14 +23,6 @@ services:
       # - TTX_START_DATE=2026-02-01 00:00:00  # 不设置则默认本月1日
       # - TTX_END_DATE=2026-02-28 23:59:59
       
-      # 入库报表特有条件
-      - TTX_RECEIPT_TYPES=CGRK,DBRK,THRK,QTRK,B2BRK,HHRK
-      
-      # B2C出库单特有条件
-      - TTX_PROCESS_TYPE=NORMAL
-      # - TTX_LEADING_STS_BEGIN=100  # 首状态起始值
-      # - TTX_LEADING_STS_END=100    # 首状态结束值
-      
       # 输出配置
       - OUTPUT_DIR=/app/output
       - OUTPUT_FORMAT=both  # csv, json, both

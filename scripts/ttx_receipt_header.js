@@ -64,6 +64,7 @@ class ReceiptHeaderExporter {
      * @param {number} options.pageSize 每页数量
      */
     async getReport(options = {}) {
+        // 硬编码：签收日期范围默认不限制
         const {
             warehouseCode = 'HF',
             companyCode = null,

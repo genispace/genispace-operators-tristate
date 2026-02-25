@@ -4,8 +4,8 @@
  * 提供 Genispace 数据源的插入和同步接口
  */
 
-const API_TOKEN = process.env.GENISPCE_API_TOKEN || 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
-const BASE_URL = process.env.GENISPCE_BASE_URL || 'https://api.genispace.cn';
+const API_TOKEN = process.env.GENISPCE_API_TOKEN;
+const BASE_URL = process.env.GENISPCE_BASE_URL;
 
 /**
  * 插入数据到数据源

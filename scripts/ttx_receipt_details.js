@@ -53,10 +53,12 @@ class ReceiptDetailsExporter {
      * @param {number} options.pageSize 每页数量
      */
     async getReport(options = {}) {
+        // 入库单类型硬编码：CGRK采购入库, DBRK调拨入库, THRK退货入库, QTRK其他入库, B2BRK B2B入库, HHRK换货入库
+        const DEFAULT_RECEIPT_TYPES = ['CGRK', 'DBRK', 'THRK', 'QTRK', 'B2BRK', 'HHRK'];
         const {
             warehouseCode = 'HF',
             companyCode = null,
-            receiptTypes = null,
+            receiptTypes = DEFAULT_RECEIPT_TYPES,
             startDate = null,
             endDate = null,
             pageSize = 500

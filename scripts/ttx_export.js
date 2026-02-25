@@ -81,20 +81,6 @@ function getConfig() {
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
         startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
         endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
-        
-        // 入库报表特有条件
-        receiptTypes: process.env.TTX_RECEIPT_TYPES 
-            ? process.env.TTX_RECEIPT_TYPES.split(',') 
-            : ['CGRK', 'DBRK', 'THRK', 'QTRK', 'B2BRK', 'HHRK'],
-        
-        // B2C出库单特有条件
-        processType: process.env.TTX_PROCESS_TYPE || 'NORMAL',
-        leadingStsBegin: process.env.TTX_LEADING_STS_BEGIN ? parseInt(process.env.TTX_LEADING_STS_BEGIN, 10) : null,
-        leadingStsEnd: process.env.TTX_LEADING_STS_END ? parseInt(process.env.TTX_LEADING_STS_END, 10) : null,
-
-        // 入库单头部特有条件
-        checkinStartDate: process.env.TTX_CHECKIN_START_DATE || null,
-        checkinEndDate: process.env.TTX_CHECKIN_END_DATE || null,
 
         // 输出配置
         outputDir: process.env.OUTPUT_DIR || '.',
@@ -187,7 +173,7 @@ async function main() {
         console.log('========== 数据同步到Genespace ==========\n');
 
         const exporter = new DataSyncExporter();
-        const result = await exporter.syncAll();
+        const result = await exporter.syncTempToData();
 
         if (result.failed > 0) {
             console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);
@@ -319,8 +305,6 @@ async function main() {
                 companyCode: 'HF-RB,HF-NDK,HF-SPD',
                 startDate: startDate,
                 endDate: config.endDate,
-                checkinStartDate: config.checkinStartDate,
-                checkinEndDate: config.checkinEndDate,
                 pageSize: config.pageSize
             });
             
@@ -353,7 +337,6 @@ async function main() {
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
                 companyCode: 'HF-RB,HF-NDK,HF-SPD',
-                receiptTypes: config.receiptTypes,
                 startDate: startDate,
                 endDate: config.endDate,
                 pageSize: config.pageSize
@@ -388,9 +371,6 @@ async function main() {
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
                 companyCode: 'HF-RB,HF-NDK,HF-SPD',
-                processType: config.processType,
-                leadingStsBegin: config.leadingStsBegin,
-                leadingStsEnd: config.leadingStsEnd,
                 startDate: startDate,
                 endDate: config.endDate,
                 pageSize: config.pageSize
@@ -425,7 +405,6 @@ async function main() {
             const data = await exporter.getReport({
                 warehouseCode: config.warehouseCode,
                 companyCode: 'HF-RB,HF-NDK,HF-SPD',
-                processType: config.processType,
                 startDate: startDate,
                 endDate: config.endDate,
                 pageSize: config.pageSize
@@ -460,7 +439,6 @@ async function main() {
             const data = await exporter.getReport({
                 startDate: startDate,
                 endDate: config.endDate,
-                companyCodes: 'HF-RB,HF-NDK,HF-SPD',
                 pageSize: config.pageSize
             });
             
@@ -484,13 +462,13 @@ async function main() {
             }
         }
 
-        // 数据同步到Genespace
-        if (reportType === 'all') {
+        // 数据同步到Genespace（可由 TTX_SKIP_FINAL_SYNC=1 跳过，用于 ttx_data_sync 步骤2 仅导出入库镜像）
+        if (reportType === 'all' && !process.env.TTX_SKIP_FINAL_SYNC) {
             console.log('\n========== 数据同步到Genespace ==========\n');
 
             const exporter = new DataSyncExporter();
 
-            const result = await exporter.syncAll();
+            const result = await exporter.syncTempToData();
 
             if (result.failed > 0) {
                 console.log(`\n警告: 数据同步完成，但有 ${result.failed} 个数据源同步失败`);

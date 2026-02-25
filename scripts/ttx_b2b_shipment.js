@@ -63,6 +63,7 @@ class B2BShipmentExporter {
      * @param {number} options.pageSize 每页数量
      */
     async getReport(options = {}) {
+        // 硬编码：B2B出库单 processType=NORMAL，首尾状态=100
         const {
             warehouseCode = 'HF',
             companyCode = null,

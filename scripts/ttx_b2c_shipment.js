@@ -274,66 +274,13 @@ class B2CShipmentExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        if (!records || records.length === 0) {
-            console.log('没有数据需要插入');
-            return;
-        }
-
-        const apiUrl = 'https://api.genispace.cn/datasources/e7fbe6d1-060a-4fd8-9c32-77cf960bf5c7/data';
-        const apiToken = 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
-
-        console.log(`\n开始插入B2C出库单数据到 API，共 ${records.length} 条记录...`);
-        console.log(`API URL: ${apiUrl}`);
-
-        // 调试：输出第一条记录
-        console.log('\n--- 示例数据 ---');
-        console.log(JSON.stringify(records[0], null, 2));
-
-        // 对敏感数据进行脱敏处理
+        const { insertDataSourceData } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
         console.log('\n--- 脱敏后的数据 ---');
         console.log(JSON.stringify(maskedRecords[0], null, 2));
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (let i = 0; i < maskedRecords.length; i++) {
-            const record = maskedRecords[i];
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiToken}`
-                    },
-                    body: JSON.stringify(record)
-                });
-
-                if (response.ok) {
-                    successCount++;
-                    if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} / ${maskedRecords.length} 条记录...`);
-                    }
-                } else {
-                    failCount++;
-                    const errorText = await response.text();
-                    console.warn(`  插入失败 [${i + 1}/${maskedRecords.length}]: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
-                }
-            } catch (error) {
-                failCount++;
-                console.warn(`  插入异常 [${i + 1}/${maskedRecords.length}]: ${error.message}`);
-            }
-
-            // 添加延迟避免请求过快
-            if (i < maskedRecords.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        console.log(`\nB2C出库单数据插入完成`);
-        console.log(`  - 成功: ${successCount} 条`);
-        console.log(`  - 失败: ${failCount} 条`);
+        await insertDataSourceData('e7fbe6d1-060a-4fd8-9c32-77cf960bf5c7', maskedRecords, {
+            logPrefix: 'B2C出库单'
+        });
     }
 
     /**

@@ -185,61 +185,10 @@ class ReceiptDetailsExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        if (!records || records.length === 0) {
-            console.log('没有数据需要插入');
-            return;
-        }
-
-        const apiUrl = 'https://api.genispace.cn/datasources/c2306183-f7c2-4a56-bc8f-59c37882afca/data';
-        const apiToken = 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
-
-        console.log(`\n开始插入入库单明细数据到 API，共 ${records.length} 条记录...`);
-        console.log(`API URL: ${apiUrl}`);
-
-        // 调试：输出第一条记录
-        console.log('\n--- 示例数据 ---');
-        console.log(JSON.stringify(records[0], null, 2));
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (let i = 0; i < records.length; i++) {
-            const record = records[i];
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiToken}`
-                    },
-                    body: JSON.stringify(record)
-                });
-
-                if (response.ok) {
-                    successCount++;
-                    if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} / ${records.length} 条记录...`);
-                    }
-                } else {
-                    failCount++;
-                    const errorText = await response.text();
-                    console.warn(`  插入失败 [${i + 1}/${records.length}]: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
-                }
-            } catch (error) {
-                failCount++;
-                console.warn(`  插入异常 [${i + 1}/${records.length}]: ${error.message}`);
-            }
-
-            // 添加延迟避免请求过快
-            if (i < records.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        console.log(`\n入库单明细数据插入完成`);
-        console.log(`  - 成功: ${successCount} 条`);
-        console.log(`  - 失败: ${failCount} 条`);
+        const { insertDataSourceData } = require('../src/services/datasource-service');
+        await insertDataSourceData('c2306183-f7c2-4a56-bc8f-59c37882afca', records, {
+            logPrefix: '入库单明细'
+        });
     }
 
     /**

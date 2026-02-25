@@ -10,6 +10,8 @@
  *   await exporter.syncAll();
  */
 
+const { syncDataSourceData } = require('../src/services/datasource-service');
+
 // 从环境变量获取配置
 const API_TOKEN = process.env.GENISPCE_API_TOKEN || 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
 const BASE_URL = process.env.GENISPCE_BASE_URL || 'https://api.genispace.cn';
@@ -66,62 +68,11 @@ class DataSyncExporter {
             return { success: false, message: `未找到数据源配置: ${dataSourceKey}` };
         }
 
-        const url = `${this.baseUrl}/datasources/${config.datasourceId}/data`;
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiToken}`
-        };
-        const body = JSON.stringify({ d: 'x' });
-
-        console.log(`\n同步数据源: ${config.name}`);
-        console.log(`数据源ID: ${config.datasourceId}`);
-        console.log(`请求URL: ${url}`);
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: body
-            });
-
-            if (response.ok) {
-                const resultText = await response.text();
-                let resultData = null;
-
-                // 解析返回的JSON
-                try {
-                    resultData = JSON.parse(resultText);
-                } catch (e) {
-                    console.warn('返回数据解析失败:', resultText);
-                }
-
-                // 提取影响行数和处理时间
-                const affectedRows = resultData?.data?.affectedRows ?? 'N/A';
-                const executionTime = resultData?.data?.executionTime ?? 'N/A';
-                const operationType = resultData?.data?.operationType ?? 'N/A';
-
-                console.log(`✓ ${config.name} 同步成功`);
-                console.log(`  操作类型: ${operationType}`);
-                console.log(`  影响行数: ${affectedRows}`);
-                console.log(`  执行时间: ${executionTime}ms`);
-
-                return {
-                    success: true,
-                    message: resultText,
-                    affectedRows: affectedRows,
-                    executionTime: executionTime,
-                    operationType: operationType
-                };
-            } else {
-                const errorText = await response.text();
-                console.error(`✗ ${config.name} 同步失败: ${response.status} ${response.statusText}`);
-                console.error(`错误详情: ${errorText}`);
-                return { success: false, message: errorText, status: response.status };
-            }
-        } catch (error) {
-            console.error(`✗ ${config.name} 同步异常: ${error.message}`);
-            return { success: false, message: error.message };
-        }
+        return await syncDataSourceData(config.datasourceId, {
+            logPrefix: config.name,
+            apiToken: this.apiToken,
+            baseUrl: this.baseUrl
+        });
     }
 
     /**

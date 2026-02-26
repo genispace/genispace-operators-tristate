@@ -2,21 +2,12 @@
 /**
  * 通天晓WMS - 数据同步模块
  *
- * 实现《通天晓数据同步步骤》中的 5 个步骤，支持分步执行以便调试。
+ * 实现《通天晓数据同步步骤》中的 5 个步骤。
+ * 功能入口为 ttx_export.js，通过 .env 中 TTX_SYNC_STEP=1,2 等配置指定步骤。
+ * 本文件主要作为模块被 ttx_export.js 引用，也可独立运行：
  *
- * 使用方法：
- *   # 执行全部步骤
- *   node ttx_data_sync.js
- *
- *   # 仅执行指定步骤（单步调试）
- *   TTX_SYNC_STEP=1 node ttx_data_sync.js    # 仅步骤1：删除镜像表
- *   TTX_SYNC_STEP=2 node ttx_data_sync.js    # 仅步骤2：通天晓导出→镜像表
- *   TTX_SYNC_STEP=3 node ttx_data_sync.js    # 仅步骤3：镜像表→临时表
- *   TTX_SYNC_STEP=4 node ttx_data_sync.js    # 仅步骤4：临时表→职能表
- *   TTX_SYNC_STEP=5 node ttx_data_sync.js    # 仅步骤5：临时表清理
- *
- *   # 执行多步骤
- *   TTX_SYNC_STEP=1,3,4 node ttx_data_sync.js
+ *   node ttx_data_sync.js              # 执行全部步骤（读取 TTX_SYNC_STEP，默认 all）
+ *   TTX_SYNC_STEP=1,2 node ttx_data_sync.js
  */
 
 const path = require('path');
@@ -174,15 +165,16 @@ class DataSyncExporter {
         console.log('\n' + '='.repeat(50));
         console.log('【步骤2】通天晓导出 → 镜像表');
         console.log('='.repeat(50));
-        console.log('调用 ttx_export.js，报表类型: all，输出: dataSource\n');
+        console.log(`调用 ttx_export.js，报表类型: ${process.env.REPORT_TYPE || 'all'}，输出: dataSource\n`);
 
         const scriptDir = path.dirname(__filename);
         const ttxExportPath = path.join(scriptDir, 'ttx_export.js');
         const env = {
             ...process.env,
-            REPORT_TYPE: 'all',
+            TTX_SYNC_STEP: '2',         // 子进程仅执行步骤2（通天晓导出→镜像表）
+            REPORT_TYPE: process.env.REPORT_TYPE || 'all',
             OUTPUT_FORMAT: 'dataSource',
-            TTX_SKIP_FINAL_SYNC: '1'  // 步骤2仅导出入库镜像，不执行临时表→职能表
+            TTX_SKIP_FINAL_SYNC: '1'   // 步骤2仅导出入库镜像，不执行临时表→职能表
         };
 
         try {

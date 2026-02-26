@@ -55,91 +55,70 @@ class ReceiptHeaderExporter {
         };
     }
 
-    /**
-     * 获取入库单头部数据
-     * @param {Object} options 查询选项
-     * @param {string} options.warehouseCode 仓库代码
-     * @param {string} options.companyCode 货主代码
-     * @param {string} options.startDate 创建开始日期
-     * @param {string} options.endDate 创建结束日期
-     * @param {string} options.checkinStartDate 签收开始日期
-     * @param {string} options.checkinEndDate 签收结束日期
-     * @param {number} options.pageSize 每页数量
-     */
-    async getReport(options = {}) {
-        // 硬编码：签收日期范围默认不限制
-        const {
-            warehouseCode = 'HF',
-            companyCode = null,
-            startDate = null,
-            endDate = null,
-            checkinStartDate = null,
-            checkinEndDate = null,
-            pageSize = 500
-        } = options;
 
-        if (!this.page) {
-            throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
+    async _fetchOnePage(filterJson, resultFields, pageStart, pageSize) {
+
+        const result = await this.page.evaluate(async (args) => {
+            const { filterJson, pageStart, pageSize, resultFields } = args;
+            try {
+                const path = '/rest/cbt/receipt_header';
+                return new Promise((resolve) => {
+                    const options = {
+                        headers: {
+                            'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Bill': 'receipt_header',
+                            'X-Result-Fields': resultFields,
+                            'filter': encodeURIComponent(filterJson),
+                            'Accept': 'application/javascript, application/json'
+                        }
+                    };
+                    window.app.dataManager.get(path, options).then(
+                        (data) => {
+                            if (Array.isArray(data)) resolve({ success: true, data: data });
+                            else if (data && data.error) resolve({ success: false, error: data.msg || 'Unknown error' });
+                            else resolve({ success: true, data: data });
+                        },
+                        (error) => resolve({ success: false, error: error.message || String(error) })
+                    );
+                });
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }, { filterJson, pageStart, pageSize, resultFields });
+
+        if (!result.success) {
+            console.error(`获取数据失败: ${result.error}`);
+            return null;
         }
+        return result.data || [];
+    }
 
-        // 构建筛选条件
+    _transformRecord(record) {
+        const fieldMap = this.getFieldMap();
+        const newRecord = {};
+        for (const [key, value] of Object.entries(record)) {
+            if (key !== '__id') {
+                newRecord[fieldMap[key] || key] = value;
+            }
+        }
+        return newRecord;
+    }
+
+    async getReportAndExportToDataSource(options = {}) {
+        const { warehouseCode = 'HF', companyCode = null, startDate = null, endDate = null, checkinStartDate = null, checkinEndDate = null, pageSize = 500 } = options;
+
+        if (!this.page) throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
+
         const filters = { and: [] };
-
-        if (warehouseCode) {
-            filters.and.push({
-                field: 'receipt_header.warehouseCode',
-                operator: '=',
-                value: warehouseCode
-            });
-        }
-
-        if (companyCode) {
-            filters.and.push({
-                field: 'receipt_header.companyCode',
-                operator: 'in',
-                disOperator: 'IN',
-                value: companyCode,
-                disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder',
-                type: 'multiSelectCombobox'
-            });
-        }
-
-        if (startDate) {
-            filters.and.push({
-                field: 'receipt_header.created:beg',
-                operator: '>=',
-                value: startDate
-            });
-        }
-
-        if (endDate) {
-            filters.and.push({
-                field: 'receipt_header.created:end',
-                operator: '<=',
-                value: endDate
-            });
-        }
-
-        if (checkinStartDate) {
-            filters.and.push({
-                field: 'receipt_header.endCheckinDatetime:beg',
-                operator: '>=',
-                value: checkinStartDate
-            });
-        }
-
-        if (checkinEndDate) {
-            filters.and.push({
-                field: 'receipt_header.endCheckinDatetime:end',
-                operator: '<=',
-                value: checkinEndDate
-            });
-        }
+        if (warehouseCode) filters.and.push({ field: 'receipt_header.warehouseCode', operator: '=', value: warehouseCode });
+        if (companyCode) filters.and.push({ field: 'receipt_header.companyCode', operator: 'in', disOperator: 'IN', value: companyCode, disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder', type: 'multiSelectCombobox' });
+        if (startDate) filters.and.push({ field: 'receipt_header.created:beg', operator: '>=', value: startDate });
+        if (endDate) filters.and.push({ field: 'receipt_header.created:end', operator: '<=', value: endDate });
+        if (checkinStartDate) filters.and.push({ field: 'receipt_header.endCheckinDatetime:beg', operator: '>=', value: checkinStartDate });
+        if (checkinEndDate) filters.and.push({ field: 'receipt_header.endCheckinDatetime:end', operator: '<=', value: checkinEndDate });
 
         const filterJson = JSON.stringify(filters);
-        console.log(`入库单头部查询条件: ${filterJson}`);
-
-        // 定义返回字段
         const resultFields = [
             'id', 'code', 'erpOrderCode', 'userDef3', 'receiptType', 'companyCode',
             'qtyRatio', 'totalQty', 'totalLines', 'leadingSts', 'trailingSts',
@@ -150,74 +129,36 @@ class ReceiptHeaderExporter {
             'consolidateCode', 'purchaseOrderCode', 'warehouseTransferCode'
         ].join(',');
 
-        // 分页获取数据
-        const allData = [];
         let pageStart = 0;
+        let totalFetched = 0, totalInserted = 0, totalFailed = 0;
+        
+        console.log(`\n\n`);
+        console.log('开始插入 入库单头部数据...');
 
         while (true) {
-            console.log(`入库单头部获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
+            const batch = await this._fetchOnePage(filterJson, resultFields, pageStart, pageSize);
+            if (!batch) break;
+            if (batch.length === 0) break;
 
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize, resultFields } = args;
+            const totalStr = `，已累计 ${totalFetched + batch.length} 条`;
+            console.log(`第 ${Math.floor(pageStart / pageSize) + 1} 页: 本页 ${batch.length} 条${totalStr}，批量插入中...`);
 
-                try {
-                    const path = '/rest/cbt/receipt_header';
+            const transformedData = batch.map(r => this._transformRecord(r));
+            const { insertDataToDataSource } = require('../src/services/datasource-service');
+            const result = await insertDataToDataSource(DATASOURCE_ID, transformedData, { logPrefix: '入库单头部' });
 
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Bill': 'receipt_header',
-                                'X-Result-Fields': resultFields,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
+            totalFetched += batch.length;
+            totalInserted += (result.successCount || 0);
+            totalFailed += (result.failCount || 0);
 
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else {
-                                    resolve({ success: true, data: data });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize, resultFields });
-
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
-
-            if (batch.length < pageSize) {
-                break;
-            }
+            if (batch.length < pageSize) break;
 
             pageStart += pageSize;
             await this.page.waitForTimeout(500);
         }
 
-        console.log(`\n入库单头部共获取 ${allData.length} 条记录`);
-        return allData;
+        console.log(`入库单头部流式导出完成\n  - 共获取: ${totalFetched} 条\n  - 插入成功: ${totalInserted} 条\n  - 插入失败: ${totalFailed} 条`);
+        return { totalFetched, totalInserted, totalFailed };
     }
 
     /**
@@ -241,24 +182,8 @@ class ReceiptHeaderExporter {
             return;
         }
 
-        // 获取字段映射
-        const fieldMap = this.getFieldMap();
-
-        // 转换数据字段名
-        const transformedData = data.map(record => {
-            const newRecord = {};
-            for (const [key, value] of Object.entries(record)) {
-                if (key !== '__id') {
-                    const newKey = fieldMap[key] || key;
-                    newRecord[newKey] = value;
-                }
-            }
-            return newRecord;
-        });
-
+        const transformedData = data.map(record => this._transformRecord(record));
         console.log(`入库单头部数据转换完成，共 ${transformedData.length} 条记录`);
-
-        // 直接调用 API 插入数据
         await this.insertData(transformedData);
     }
 

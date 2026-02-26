@@ -37,13 +37,6 @@ async function insertDataSourceData(datasourceId, records, options = {}) {
 
     const apiUrl = `${baseUrl}/datasources/${datasourceId}/data`;
 
-    console.log(`\n开始插入${logPrefix}数据到 API，共 ${records.length} 条记录...`);
-    console.log(`API URL: ${apiUrl}`);
-
-    // 调试：输出第一条记录
-    console.log('\n--- 示例数据 ---');
-    console.log(JSON.stringify(records[0], null, 2));
-
     let successCount = 0;
     let failCount = 0;
 
@@ -114,9 +107,6 @@ async function batchInsertDataSourceData(datasourceId, records, options = {}) {
 
     const apiUrl = `${baseUrl}/datasources/${datasourceId}/data`;
 
-    console.log(`\n开始批量插入${logPrefix}数据到 API，共 ${records.length} 条记录...`);
-    console.log(`API URL: ${apiUrl}`);
-
     try {
         const response = await fetch(apiUrl, {
             method: 'POST',
@@ -130,8 +120,6 @@ async function batchInsertDataSourceData(datasourceId, records, options = {}) {
         if (response.ok) {
             const resultData = await response.json();
             const affectedRows = resultData?.data?.affectedRows ?? 0;
-            console.log(`✓ ${logPrefix} 批量插入成功`);
-            console.log(`  - 影响行数: ${affectedRows}`);
             return {
                 success: true,
                 successCount: records.length,
@@ -168,11 +156,7 @@ async function batchInsertDataSourceData(datasourceId, records, options = {}) {
  * @returns {Promise<{successCount: number, failCount: number, ...}>}
  */
 async function insertDataToDataSource(datasourceId, records, options = {}) {
-    const useBatchInsert = process.env.TTX_USE_BATCH_INSERT === 'true' || process.env.TTX_USE_BATCH_INSERT === '1';
-    if (useBatchInsert) {
-        return batchInsertDataSourceData(datasourceId, records, options);
-    }
-    return insertDataSourceData(datasourceId, records, options);
+    return batchInsertDataSourceData(datasourceId, records, options);
 }
 
 /**
@@ -202,7 +186,6 @@ async function syncDataSourceData(datasourceId, options = {}) {
 
     console.log(`\n同步${logPrefix}`);
     console.log(`数据源ID: ${datasourceId}`);
-    console.log(`请求URL: ${url}`);
 
     try {
         const response = await fetch(url, {
@@ -226,9 +209,6 @@ async function syncDataSourceData(datasourceId, options = {}) {
             const operationType = resultData?.data?.operationType ?? 'N/A';
 
             console.log(`✓ ${logPrefix} 同步成功`);
-            console.log(`  操作类型: ${operationType}`);
-            console.log(`  影响行数: ${affectedRows}`);
-            console.log(`  执行时间: ${executionTime}ms`);
 
             return {
                 success: true,

@@ -6,8 +6,7 @@
  */
 
 /** 数据源ID，修改此处即可更换数据源 */
-// const DATASOURCE_ID = '809a7e42-6f79-4a82-b776-2734a7076f25';
-const DATASOURCE_ID = 'd18ed1b4-ed92-48b4-af0c-90ce793b4de9';
+const DATASOURCE_ID = '809a7e42-6f79-4a82-b776-2734a7076f25';
 
 class B2BShipmentExporter {
     constructor(options = {}) {
@@ -55,19 +54,81 @@ class B2BShipmentExporter {
     }
 
     /**
-     * 获取B2B出库单数据
-     * @param {Object} options 查询选项
-     * @param {string} options.warehouseCode 仓库代码
-     * @param {string} options.companyCode 货主代码
-     * @param {string} options.processType 处理类型
-     * @param {number} options.leadingStsBegin 首状态起始值
-     * @param {number} options.leadingStsEnd 首状态结束值
-     * @param {string} options.startDate 开始日期
-     * @param {string} options.endDate 结束日期
-     * @param {number} options.pageSize 每页数量
+     * 获取单页数据（内部方法，供 getReport 和 getReportAndExportToDataSource 复用）
+     * @private
      */
-    async getReport(options = {}) {
-        // 硬编码：B2B出库单 processType=NORMAL，首尾状态=100
+    async _fetchOnePage(filterJson, resultFields, pageStart, pageSize) {
+
+        const result = await this.page.evaluate(async (args) => {
+            const { filterJson, pageStart, pageSize, resultFields } = args;
+
+            try {
+                const path = '/rest/cbt/shipment_header';
+
+                return new Promise((resolve) => {
+                    const options = {
+                        headers: {
+                            'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Bill': 'shipment_header',
+                            'X-Result-Fields': resultFields,
+                            'filter': encodeURIComponent(filterJson),
+                            'Accept': 'application/javascript, application/json'
+                        }
+                    };
+
+                    window.app.dataManager.get(path, options).then(
+                        (data) => {
+                            if (Array.isArray(data)) {
+                                resolve({ success: true, data: data });
+                            } else if (data && data.error) {
+                                resolve({ success: false, error: data.msg || 'Unknown error' });
+                            } else {
+                                resolve({ success: true, data: data });
+                            }
+                        },
+                        (error) => {
+                            resolve({ success: false, error: error.message || String(error) });
+                        }
+                    );
+                });
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }, { filterJson, pageStart, pageSize, resultFields });
+
+        if (!result.success) {
+            console.error(`获取数据失败: ${result.error}`);
+            return null;
+        }
+
+        return result.data || [];
+    }
+
+    /**
+     * 转换单条记录的字段名
+     * @param {Object} record 原始记录
+     * @returns {Object} 转换后的记录
+     */
+    _transformRecord(record) {
+        const fieldMap = this.getFieldMap();
+        const newRecord = {};
+        for (const [key, value] of Object.entries(record)) {
+            if (key !== '__id') {
+                const newKey = fieldMap[key] || key;
+                newRecord[newKey] = value;
+            }
+        }
+        return newRecord;
+    }
+
+    /**
+     * 流式导出：分页获取数据后立即批量插入，不累积到内存
+     * 适用于数据量大的场景，避免内存溢出
+     * @param {Object} options 同 getReport 的 options
+     * @returns {Promise<{totalFetched: number, totalInserted: number, totalFailed: number}>}
+     */
+    async getReportAndExportToDataSource(options = {}) {
         const {
             warehouseCode = 'HF',
             companyCode = null,
@@ -83,7 +144,7 @@ class B2BShipmentExporter {
             throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
         }
 
-        // 构建筛选条件（与curl条件顺序一致）
+        // 构建筛选条件（与 getReport 一致）
         const filters = { and: [] };
 
         if (companyCode) {
@@ -107,7 +168,6 @@ class B2BShipmentExporter {
             });
         }
 
-        // leadingSts 条件始终添加（默认值100）
         filters.and.push({
             field: 'leadingSts:beg',
             operator: '>=',
@@ -145,7 +205,6 @@ class B2BShipmentExporter {
             });
         }
 
-        // 固定条件：B2B出库单
         filters.and.push({
             field: 'shipObjType',
             operator: '=',
@@ -154,9 +213,6 @@ class B2BShipmentExporter {
         });
 
         const filterJson = JSON.stringify(filters);
-        console.log(`B2B出库单查询条件: ${filterJson}`);
-
-        // 定义返回字段（与curl中的X-Result-Fields保持一致）
         const resultFields = [
             'id', 'created', 'code', 'shipmentType', 'companyCode', 'userDef1',
             'shipToAttentionTo', 'shipToAddress1', 'carrierCode', 'shipTo', 'shipToName',
@@ -166,63 +222,34 @@ class B2BShipmentExporter {
             'deliveryNote', 'uploadBatch', 'consolidated'
         ].join(',');
 
-        // 分页获取数据
-        const allData = [];
         let pageStart = 0;
+        let totalFetched = 0;
+        let totalInserted = 0;
+        let totalFailed = 0;
+
+        console.log(`\n\n`);
+        console.log('开始插入 B2B出库单数据...');
 
         while (true) {
-            console.log(`B2B出库单获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
+            const batch = await this._fetchOnePage(filterJson, resultFields, pageStart, pageSize);
+            if (!batch) break;
+            if (batch.length === 0) break;
 
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize, resultFields } = args;
+            const totalStr = `，已累计 ${totalFetched + batch.length} 条`;
+            console.log(`第 ${Math.floor(pageStart / pageSize) + 1} 页: 本页 ${batch.length} 条${totalStr}，批量插入中...`);
 
-                try {
-                    const path = '/rest/cbt/shipment_header';
+            // 转换并脱敏后立即插入，不累积
+            const transformedData = batch.map(r => this._transformRecord(r));
+            const maskedRecords = this.maskSensitiveData(transformedData);
 
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Bill': 'shipment_header',
-                                'X-Result-Fields': resultFields,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
+            const { insertDataToDataSource } = require('../src/services/datasource-service');
+            const result = await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
+                logPrefix: 'B2B出库单'
+            });
 
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else {
-                                    resolve({ success: true, data: data });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize, resultFields });
-
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
+            totalFetched += batch.length;
+            totalInserted += (result.successCount || 0);
+            totalFailed += (result.failCount || 0);
 
             if (batch.length < pageSize) {
                 break;
@@ -232,8 +259,12 @@ class B2BShipmentExporter {
             await this.page.waitForTimeout(500);
         }
 
-        console.log(`\nB2B出库单共获取 ${allData.length} 条记录`);
-        return allData;
+        console.log(`B2B出库单流式导出完成`);
+        console.log(`  - 共获取: ${totalFetched} 条`);
+        console.log(`  - 插入成功: ${totalInserted} 条`);
+        console.log(`  - 插入失败: ${totalFailed} 条`);
+
+        return { totalFetched, totalInserted, totalFailed };
     }
 
     /**
@@ -273,8 +304,6 @@ class B2BShipmentExporter {
     async insertData(records) {
         const { insertDataToDataSource } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
-        console.log('\n--- 脱敏后的数据 ---');
-        console.log(JSON.stringify(maskedRecords[0], null, 2));
         await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
             logPrefix: 'B2B出库单'
         });
@@ -290,24 +319,9 @@ class B2BShipmentExporter {
             return;
         }
 
-        // 获取字段映射
-        const fieldMap = this.getFieldMap();
-
-        // 转换数据字段名
-        const transformedData = data.map(record => {
-            const newRecord = {};
-            for (const [key, value] of Object.entries(record)) {
-                if (key !== '__id') {
-                    const newKey = fieldMap[key] || key;
-                    newRecord[newKey] = value;
-                }
-            }
-            return newRecord;
-        });
-
+        const transformedData = data.map(record => this._transformRecord(record));
         console.log(`B2B出库单数据转换完成，共 ${transformedData.length} 条记录`);
 
-        // 直接调用 API 插入数据
         await this.insertData(transformedData);
     }
 

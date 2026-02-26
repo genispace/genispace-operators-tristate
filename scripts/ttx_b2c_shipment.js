@@ -59,20 +59,61 @@ class B2CShipmentExporter {
         };
     }
 
-    /**
-     * 获取B2C出库单数据
-     * @param {Object} options 查询选项
-     * @param {string} options.warehouseCode 仓库代码
-     * @param {string} options.companyCode 货主代码
-     * @param {string} options.processType 处理类型
-     * @param {number} options.leadingStsBegin 首状态起始值
-     * @param {number} options.leadingStsEnd 首状态结束值
-     * @param {string} options.startDate 开始日期
-     * @param {string} options.endDate 结束日期
-     * @param {number} options.pageSize 每页数量
-     */
-    async getReport(options = {}) {
-        // 硬编码：B2C出库单 processType=NORMAL，首尾状态不限制
+
+    async _fetchOnePage(filterJson, resultFields, pageStart, pageSize) {
+
+        const result = await this.page.evaluate(async (args) => {
+            const { filterJson, pageStart, pageSize, resultFields } = args;
+            try {
+                const path = '/rest/cbt/shipment_header';
+                return new Promise((resolve) => {
+                    const options = {
+                        headers: {
+                            'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Bill': 'shipment_header',
+                            'X-Result-Fields': resultFields,
+                            'filter': encodeURIComponent(filterJson),
+                            'Accept': 'application/javascript, application/json'
+                        }
+                    };
+                    window.app.dataManager.get(path, options).then(
+                        (data) => {
+                            if (Array.isArray(data)) {
+                                resolve({ success: true, data: data });
+                            } else if (data && data.error) {
+                                resolve({ success: false, error: data.msg || 'Unknown error' });
+                            } else {
+                                resolve({ success: true, data: data });
+                            }
+                        },
+                        (error) => resolve({ success: false, error: error.message || String(error) })
+                    );
+                });
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }, { filterJson, pageStart, pageSize, resultFields });
+
+        if (!result.success) {
+            console.error(`获取数据失败: ${result.error}`);
+            return null;
+        }
+        return result.data || [];
+    }
+
+    _transformRecord(record) {
+        const fieldMap = this.getFieldMap();
+        const newRecord = {};
+        for (const [key, value] of Object.entries(record)) {
+            if (key !== '__id') {
+                newRecord[fieldMap[key] || key] = value;
+            }
+        }
+        return newRecord;
+    }
+
+    async getReportAndExportToDataSource(options = {}) {
         const {
             warehouseCode = 'HF',
             companyCode = null,
@@ -84,88 +125,19 @@ class B2CShipmentExporter {
             pageSize = 500
         } = options;
 
-        if (!this.page) {
-            throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
-        }
+        if (!this.page) throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
 
-        // 构建筛选条件
         const filters = { and: [] };
-
-        // 固定条件：B2C出库单
-        filters.and.push({
-            field: 'shipObjType',
-            operator: '=',
-            value: 'TO_C',
-            table: 'shipment_header'
-        });
-
-        if (warehouseCode) {
-            filters.and.push({
-                field: 'shipment_header.warehouseCode',
-                operator: '=',
-                value: warehouseCode
-            });
-        }
-
-        if (companyCode) {
-            filters.and.push({
-                field: 'shipment_header.companyCode',
-                operator: 'in',
-                disOperator: 'IN',
-                value: companyCode,
-                disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder',
-                type: 'multiSelectCombobox'
-            });
-        }
-
-        if (processType) {
-            filters.and.push({
-                field: 'shipment_header.processType',
-                operator: 'in',
-                disOperator: 'IN',
-                value: processType,
-                type: 'multiSelectCombobox'
-            });
-        }
-
-        if (leadingStsBegin !== null) {
-            filters.and.push({
-                field: 'leadingSts:beg',
-                operator: '>=',
-                value: String(leadingStsBegin),
-                table: 'shipment_header'
-            });
-        }
-
-        if (leadingStsEnd !== null) {
-            filters.and.push({
-                field: 'leadingSts:end',
-                operator: '<=',
-                value: String(leadingStsEnd),
-                table: 'shipment_header'
-            });
-        }
-
-        if (startDate) {
-            filters.and.push({
-                field: 'shipment_header.created:beg',
-                operator: '>=',
-                value: startDate
-            });
-        }
-
-        if (endDate) {
-            filters.and.push({
-                field: 'shipment_header.created:end',
-                operator: '<=',
-                value: endDate
-            });
-        }
+        filters.and.push({ field: 'shipObjType', operator: '=', value: 'TO_C', table: 'shipment_header' });
+        if (warehouseCode) filters.and.push({ field: 'shipment_header.warehouseCode', operator: '=', value: warehouseCode });
+        if (companyCode) filters.and.push({ field: 'shipment_header.companyCode', operator: 'in', disOperator: 'IN', value: companyCode, disValue: 'HF-RB Reebok,HF-NDK Nautica,HF-SPD Spyder', type: 'multiSelectCombobox' });
+        if (processType) filters.and.push({ field: 'shipment_header.processType', operator: 'in', disOperator: 'IN', value: processType, type: 'multiSelectCombobox' });
+        if (leadingStsBegin !== null) filters.and.push({ field: 'leadingSts:beg', operator: '>=', value: String(leadingStsBegin), table: 'shipment_header' });
+        if (leadingStsEnd !== null) filters.and.push({ field: 'leadingSts:end', operator: '<=', value: String(leadingStsEnd), table: 'shipment_header' });
+        if (startDate) filters.and.push({ field: 'shipment_header.created:beg', operator: '>=', value: startDate });
+        if (endDate) filters.and.push({ field: 'shipment_header.created:end', operator: '<=', value: endDate });
 
         const filterJson = JSON.stringify(filters);
-        console.log(`B2C出库单查询条件: ${filterJson}`);
-
-        // 定义返回字段
         const resultFields = [
             'id', 'created', 'frontTime', 'payTime', 'code', 'shipmentType',
             'companyCode', 'carrierCode', 'processType', 'userDef1',
@@ -176,74 +148,38 @@ class B2CShipmentExporter {
             'rejectionNote', 'actualShipDateTime', 'uploadBatch', 'deliveryNote', 'userDef5'
         ].join(',');
 
-        // 分页获取数据
-        const allData = [];
         let pageStart = 0;
+        let totalFetched = 0, totalInserted = 0, totalFailed = 0;
+        
+        console.log(`\n\n`);
+        console.log('开始插入 B2C出库单数据...');
 
         while (true) {
-            console.log(`B2C出库单获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
+            const batch = await this._fetchOnePage(filterJson, resultFields, pageStart, pageSize);
+            if (!batch) break;
+            if (batch.length === 0) break;
 
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize, resultFields } = args;
+            const totalStr = `，已累计 ${totalFetched + batch.length} 条`;
+            console.log(`第 ${Math.floor(pageStart / pageSize) + 1} 页: 本页 ${batch.length} 条${totalStr}，批量插入中...`);
 
-                try {
-                    const path = '/rest/cbt/shipment_header';
+            const transformedData = batch.map(r => this._transformRecord(r));
+            const maskedRecords = this.maskSensitiveData(transformedData);
 
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Bill': 'shipment_header',
-                                'X-Result-Fields': resultFields,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
+            const { insertDataToDataSource } = require('../src/services/datasource-service');
+            const result = await insertDataToDataSource(DATASOURCE_ID, maskedRecords, { logPrefix: 'B2C出库单' });
 
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else {
-                                    resolve({ success: true, data: data });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize, resultFields });
+            totalFetched += batch.length;
+            totalInserted += (result.successCount || 0);
+            totalFailed += (result.failCount || 0);
 
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
-
-            if (batch.length < pageSize) {
-                break;
-            }
+            if (batch.length < pageSize) break;
 
             pageStart += pageSize;
             await this.page.waitForTimeout(500);
         }
 
-        console.log(`\nB2C出库单共获取 ${allData.length} 条记录`);
-        return allData;
+        console.log(`B2C出库单流式导出完成\n  - 共获取: ${totalFetched} 条\n  - 插入成功: ${totalInserted} 条\n  - 插入失败: ${totalFailed} 条`);
+        return { totalFetched, totalInserted, totalFailed };
     }
 
     /**
@@ -280,8 +216,6 @@ class B2CShipmentExporter {
     async insertData(records) {
         const { insertDataToDataSource } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
-        console.log('\n--- 脱敏后的数据 ---');
-        console.log(JSON.stringify(maskedRecords[0], null, 2));
         await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
             logPrefix: 'B2C出库单'
         });
@@ -297,24 +231,8 @@ class B2CShipmentExporter {
             return;
         }
 
-        // 获取字段映射
-        const fieldMap = this.getFieldMap();
-
-        // 转换数据字段名
-        const transformedData = data.map(record => {
-            const newRecord = {};
-            for (const [key, value] of Object.entries(record)) {
-                if (key !== '__id') {
-                    const newKey = fieldMap[key] || key;
-                    newRecord[newKey] = value;
-                }
-            }
-            return newRecord;
-        });
-
+        const transformedData = data.map(record => this._transformRecord(record));
         console.log(`B2C出库单数据转换完成，共 ${transformedData.length} 条记录`);
-
-        // 直接调用 API 插入数据
         await this.insertData(transformedData);
     }
 

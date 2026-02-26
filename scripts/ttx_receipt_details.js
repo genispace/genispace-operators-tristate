@@ -5,6 +5,9 @@
  * 提供入库单明细的查询、字段映射和数据源导出功能
  */
 
+/** 数据源ID，修改此处即可更换数据源 */
+const DATASOURCE_ID = 'c2306183-f7c2-4a56-bc8f-59c37882afca';
+
 class ReceiptDetailsExporter {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
@@ -188,7 +191,7 @@ class ReceiptDetailsExporter {
      */
     async insertData(records) {
         const { insertDataToDataSource } = require('../src/services/datasource-service');
-        await insertDataToDataSource('c2306183-f7c2-4a56-bc8f-59c37882afca', records, {
+        await insertDataToDataSource(DATASOURCE_ID, records, {
             logPrefix: '入库单明细'
         });
     }

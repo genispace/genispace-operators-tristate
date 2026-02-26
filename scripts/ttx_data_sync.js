@@ -19,11 +19,11 @@
  *   TTX_SYNC_STEP=1,3,4 node ttx_data_sync.js
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const { syncDataSourceData } = require('../src/services/datasource-service');
 const { execSync } = require('child_process');
-const path = require('path');
 
 // 从环境变量获取配置
 const API_TOKEN = process.env.GENISPCE_API_TOKEN || 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';

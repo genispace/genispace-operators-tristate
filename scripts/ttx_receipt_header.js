@@ -5,6 +5,9 @@
  * 提供入库单头部的查询、字段映射和数据源导出功能
  */
 
+/** 数据源ID，修改此处即可更换数据源 */
+const DATASOURCE_ID = 'ace5c767-4bce-4da0-b46b-e36e9af365a1';
+
 class ReceiptHeaderExporter {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
@@ -223,7 +226,7 @@ class ReceiptHeaderExporter {
      */
     async insertData(records) {
         const { insertDataToDataSource } = require('../src/services/datasource-service');
-        await insertDataToDataSource('ace5c767-4bce-4da0-b46b-e36e9af365a1', records, {
+        await insertDataToDataSource(DATASOURCE_ID, records, {
             logPrefix: '入库单头部'
         });
     }

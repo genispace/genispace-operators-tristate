@@ -6,6 +6,9 @@
  * API: /rest/sqlTemplate/grid/_XLS_/拣货明细报表
  */
 
+/** 数据源ID，修改此处即可更换数据源 */
+const DATASOURCE_ID = 'da65089e-0772-465c-b034-06956304c373';
+
 class B2CPakingDetailsExporter {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
@@ -221,7 +224,7 @@ class B2CPakingDetailsExporter {
         if (maskedRecords[0]) {
             console.log(JSON.stringify(maskedRecords[0], null, 2));
         }
-        await insertDataToDataSource('da65089e-0772-465c-b034-06956304c373', maskedRecords, {
+        await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
             logPrefix: 'B2C拣货明细'
         });
     }

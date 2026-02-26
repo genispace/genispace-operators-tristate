@@ -5,6 +5,10 @@
  * 提供B2B出库单的查询、字段映射和数据源导出功能
  */
 
+/** 数据源ID，修改此处即可更换数据源 */
+// const DATASOURCE_ID = '809a7e42-6f79-4a82-b776-2734a7076f25';
+const DATASOURCE_ID = 'd18ed1b4-ed92-48b4-af0c-90ce793b4de9';
+
 class B2BShipmentExporter {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
@@ -271,7 +275,7 @@ class B2BShipmentExporter {
         const maskedRecords = this.maskSensitiveData(records);
         console.log('\n--- 脱敏后的数据 ---');
         console.log(JSON.stringify(maskedRecords[0], null, 2));
-        await insertDataToDataSource('809a7e42-6f79-4a82-b776-2734a7076f25', maskedRecords, {
+        await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
             logPrefix: 'B2B出库单'
         });
     }

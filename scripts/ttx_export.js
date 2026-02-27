@@ -18,6 +18,7 @@ const { execSync } = require('child_process');
 
 // 导入导出模块
 const { ReceiptHeaderExporter } = require('./ttx_receipt_header');
+const { ReceiptHeaderExExporter } = require('./ttx_receipt_header_ex');
 const { ReceiptDetailsExporter } = require('./ttx_receipt_details');
 const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
@@ -70,7 +71,7 @@ function getConfig() {
         username: process.env.TTX_USERNAME || 'HFLS17',
         password: process.env.TTX_PASSWORD || 'Xyy1234567',
         
-        // 报表类型（步骤2时）: receipt_header, receipt_details, b2c_shipment, b2b_shipment, paking_details, all
+        // 报表类型（步骤2时）: receipt_header, receipt_header_ex, receipt_details, b2c_shipment, b2b_shipment, paking_details, all
         reportType: process.env.REPORT_TYPE || 'all',
 
         // 通用查询条件
@@ -81,6 +82,7 @@ function getConfig() {
         // 运行配置
         headless: process.env.HEADLESS !== 'false',
         pageSize: parseInt(process.env.PAGE_SIZE || '500', 10),
+        navigationTimeout: parseInt(process.env.TTX_NAVIGATION_TIMEOUT || '60000', 10),
 
         // 分步执行，默认 all
         ttSyncStep: process.env.TTX_SYNC_STEP || 'all'
@@ -108,8 +110,11 @@ async function runBrowserExportToMirror(config, browserInstance = null, reportTy
         await page.setViewport({ width: 1920, height: 1080 });
 
         const url = `${config.baseUrl}/index.html?customer=${config.customer}&lang=zh`;
-        await page.goto(url, { waitUntil: 'networkidle2' });
-        await page.waitForTimeout(3000);
+        await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: config.navigationTimeout
+        });
+        await page.waitForTimeout(5000);
 
         const frames = page.frames();
         let loginFrame = null;
@@ -161,8 +166,8 @@ async function runBrowserExportToMirror(config, browserInstance = null, reportTy
         const type = reportType.toLowerCase();
         const runAll = type === 'all';
 
-        if (runAll || type === 'receipt_header') {
-            await new ReceiptHeaderExporter({ page }).getReportAndExportToDataSource(reportOptions);
+        if (runAll || type === 'receipt_header_ex') {
+            await new ReceiptHeaderExExporter({ page }).getReportAndExportToDataSource({ ...reportOptions, userName: config.username });
         }
         if (runAll || type === 'receipt_details') {
             await new ReceiptDetailsExporter({ page }).getReportAndExportToDataSource(reportOptions);

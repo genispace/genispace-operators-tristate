@@ -56,16 +56,18 @@ const MIRROR_DELETE_DATASOURCES = [
 
 /** 步骤3：镜像表 → 临时表（UPSERT）- 数据源ID */
 const MIRROR_TO_TEMP_DATASOURCES = [
-    {
-        key: 'mirror_b2c_express_package_to_temp',
-        name: 'B2C快递包裹 → 临时表',
-        datasourceId: 'ad69038b-0a41-4042-b709-93775b4639ac'
-    },
-    {
-        key: 'mirror_b2c_picking_details_to_temp',
-        name: 'B2C拣货明细 → 临时表',
-        datasourceId: '01a1fb3c-84d3-4e97-ac2d-94ddaa1b8c75'
-    },
+    // temp_b2c_express_package_raw 已废弃, 使用 mirror_b2c_express_package_raw
+    // {
+    //     key: 'mirror_b2c_express_package_to_temp',
+    //     name: 'B2C快递包裹 → 临时表',
+    //     datasourceId: 'ad69038b-0a41-4042-b709-93775b4639ac'
+    // },
+    // temp_b2c_picking_details_raw 已废弃, 使用 mirror_b2c_picking_details_raw
+    // {
+    //     key: 'mirror_b2c_picking_details_to_temp',
+    //     name: 'B2C拣货明细 → 临时表',
+    //     datasourceId: '01a1fb3c-84d3-4e97-ac2d-94ddaa1b8c75'
+    // },
     {
         key: 'mirror_b2b_to_temp',
         name: 'B2B出库单 → 临时表',
@@ -76,11 +78,12 @@ const MIRROR_TO_TEMP_DATASOURCES = [
         name: 'B2C出库单 → 临时表',
         datasourceId: 'd9bff880-4e4a-4729-a5fd-22822fa300e7'
     },
-    {
-        key: 'mirror_inbound_details_to_temp',
-        name: '入库单明细 → 临时表',
-        datasourceId: 'b405de25-84f6-4394-a3b9-472c61251659'
-    },
+    // temp_inbound_details_raw 已废弃, 使用 mirror_inbound_details_raw
+    // {
+    //     key: 'mirror_inbound_details_to_temp',
+    //     name: '入库单明细 → 临时表',
+    //     datasourceId: 'b405de25-84f6-4394-a3b9-472c61251659' 
+    // },
     {
         key: 'mirror_inbound_to_temp',
         name: '入库单头部 → 临时表',

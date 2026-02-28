@@ -6,6 +6,9 @@
  * API: /rest/sqlTemplate/grid/_XLS_/拣货明细报表
  */
 
+/** 数据源ID，修改此处即可更换数据源 */
+const DATASOURCE_ID = 'da65089e-0772-465c-b034-06956304c373';
+
 class B2CPakingDetailsExporter {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'https://ttx.56xyy.com';
@@ -50,132 +53,105 @@ class B2CPakingDetailsExporter {
         };
     }
 
-    /**
-     * 获取B2C拣货明细数据
-     * 通过SQL模板报表接口获取数据
-     * @param {Object} options 查询选项
-     * @param {string} options.startDate 开始日期
-     * @param {string} options.endDate 结束日期
-     * @param {string|Array} options.companyCodes 货主代码列表（支持逗号分隔或数组）
-     * @param {number} options.pageSize 每页数量
-     */
-    async getReport(options = {}) {
-        const {
-            startDate = null,
-            endDate = null,
-            companyCodes = null,
-            pageSize = 100
-        } = options;
+    async _fetchOnePage(filterJson, pageStart, pageSize) {
 
-        if (!this.page) {
-            throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
+        const result = await this.page.evaluate(async (args) => {
+            const { filterJson, pageStart, pageSize } = args;
+            try {
+                const path = '/rest/sqlTemplate/grid/_XLS_/拣货明细报表';
+                return new Promise((resolve) => {
+                    const options = {
+                        headers: {
+                            'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
+                            'filter': encodeURIComponent(filterJson),
+                            'Accept': 'application/javascript, application/json'
+                        }
+                    };
+                    window.app.dataManager.get(path, options).then(
+                        (data) => {
+                            if (Array.isArray(data)) {
+                                resolve({ success: true, data: data });
+                            } else if (data && data.error) {
+                                resolve({ success: false, error: data.msg || 'Unknown error' });
+                            } else if (data && data.result && Array.isArray(data.result)) {
+                                resolve({ success: true, data: data.result });
+                            } else {
+                                resolve({ success: true, data: [] });
+                            }
+                        },
+                        (error) => resolve({ success: false, error: error.message || String(error) })
+                    );
+                });
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }, { filterJson, pageStart, pageSize });
+
+        if (!result.success) {
+            console.error(`获取数据失败: ${result.error}`);
+            return null;
         }
+        return result.data || [];
+    }
 
-        // 构建筛选条件
+    _transformRecord(record) {
+        const fieldMap = this.getFieldMap();
+        const newRecord = {};
+        for (const [key, value] of Object.entries(record)) {
+            if (key !== '__id') {
+                newRecord[fieldMap[key] || key] = value;
+            }
+        }
+        return newRecord;
+    }
+
+    async getReportAndExportToDataSource(options = {}) {
+        const { startDate = null, endDate = null, companyCodes = 'HF-RB,HF-NDK,HF-SPD', pageSize = 100 } = options;
+
+        if (!this.page) throw new Error('页面对象未设置，请先调用 setPage() 设置 page');
+
         const filters = { and: [] };
-
-        // 货主筛选（支持多个，用 in 操作符）
         if (companyCodes) {
-            const codes = Array.isArray(companyCodes) 
-                ? companyCodes.join(',') 
-                : companyCodes;
-            filters.and.push({
-                field: 'td.companyCode',
-                operator: 'in',
-                value: codes
-            });
-            console.log(`货主筛选条件: ${codes}`);
+            const codes = Array.isArray(companyCodes) ? companyCodes.join(',') : companyCodes;
+            filters.and.push({ field: 'td.companyCode', operator: 'in', value: codes });
         }
-
-        // 时间范围筛选
-        if (startDate) {
-            filters.and.push({
-                field: 'th.created:begin',
-                operator: '>=',
-                value: startDate
-            });
-        }
-
-        if (endDate) {
-            filters.and.push({
-                field: 'th.created:end',
-                operator: '<=',
-                value: endDate
-            });
-        }
+        if (startDate) filters.and.push({ field: 'th.created:begin', operator: '>=', value: startDate });
+        if (endDate) filters.and.push({ field: 'th.created:end', operator: '<=', value: endDate });
 
         const filterJson = JSON.stringify(filters);
-        console.log(`B2C拣货明细查询条件: ${filterJson}`);
-
-        // 分页获取数据
-        const allData = [];
         let pageStart = 0;
+        let totalFetched = 0, totalInserted = 0, totalFailed = 0;
+
+        console.log(`\n\n`);
+        console.log('开始插入 B2C拣货明细数据...');
 
         while (true) {
-            console.log(`B2C拣货明细获取数据: ${pageStart} - ${pageStart + pageSize - 1}`);
+            const batch = await this._fetchOnePage(filterJson, pageStart, pageSize);
+            if (!batch) break;
+            if (batch.length === 0) break;
 
-            const result = await this.page.evaluate(async (args) => {
-                const { filterJson, pageStart, pageSize } = args;
+            const totalStr = `，已累计 ${totalFetched + batch.length} 条`;
+            console.log(`第 ${Math.floor(pageStart / pageSize) + 1} 页: 本页 ${batch.length} 条${totalStr}，批量插入中...`);
 
-                try {
-                    // SQL模板报表接口
-                    const path = '/rest/sqlTemplate/grid/_XLS_/拣货明细报表';
+            const transformedData = batch.map(r => this._transformRecord(r));
+            const maskedRecords = this.maskSensitiveData(transformedData);
 
-                    return new Promise((resolve) => {
-                        const options = {
-                            headers: {
-                                'Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'X-Range': `items=${pageStart}-${pageStart + pageSize - 1}`,
-                                'filter': encodeURIComponent(filterJson),
-                                'Accept': 'application/javascript, application/json'
-                            }
-                        };
+            const { insertDataToDataSource } = require('../src/services/datasource-service');
+            const result = await insertDataToDataSource(DATASOURCE_ID, maskedRecords, { logPrefix: 'B2C拣货明细' });
 
-                        window.app.dataManager.get(path, options).then(
-                            (data) => {
-                                if (Array.isArray(data)) {
-                                    resolve({ success: true, data: data });
-                                } else if (data && data.error) {
-                                    resolve({ success: false, error: data.msg || 'Unknown error' });
-                                } else if (data && data.result && Array.isArray(data.result)) {
-                                    resolve({ success: true, data: data.result });
-                                } else {
-                                    resolve({ success: true, data: [] });
-                                }
-                            },
-                            (error) => {
-                                resolve({ success: false, error: error.message || String(error) });
-                            }
-                        );
-                    });
-                } catch (e) {
-                    return { success: false, error: e.message };
-                }
-            }, { filterJson, pageStart, pageSize });
+            totalFetched += batch.length;
+            totalInserted += (result.successCount || 0);
+            totalFailed += (result.failCount || 0);
 
-            if (!result.success) {
-                console.error(`获取数据失败: ${result.error}`);
-                break;
-            }
-
-            const batch = result.data || [];
-            if (batch.length === 0) {
-                break;
-            }
-
-            console.log(`  获取到 ${batch.length} 条记录`);
-            allData.push(...batch);
-
-            if (batch.length < pageSize) {
-                break;
-            }
+            if (batch.length < pageSize) break;
 
             pageStart += pageSize;
             await this.page.waitForTimeout(500);
         }
 
-        console.log(`\nB2C拣货明细共获取 ${allData.length} 条记录`);
-        return allData;
+        console.log(`B2C拣货明细流式导出完成\n  - 共获取: ${totalFetched} 条\n  - 插入成功: ${totalInserted} 条\n  - 插入失败: ${totalFailed} 条`);
+        return { totalFetched, totalInserted, totalFailed };
     }
 
     /**
@@ -214,70 +190,15 @@ class B2CPakingDetailsExporter {
      * @param {Array} records 要插入的数据记录数组
      */
     async insertData(records) {
-        if (!records || records.length === 0) {
-            console.log('没有数据需要插入');
-            return;
-        }
-
-        const apiUrl = 'https://api.genispace.cn/datasources/da65089e-0772-465c-b034-06956304c373/data';
-        const apiToken = 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
-
-        console.log(`\n开始插入B2C拣货明细数据到API，共 ${records.length} 条记录...`);
-        console.log(`API URL: ${apiUrl}`);
-
-        // 调试：输出第一条记录
-        console.log('\n--- 示例数据 ---');
-        if (records[0]) {
-            console.log(JSON.stringify(records[0], null, 2));
-        }
-
-        // 对敏感数据进行脱敏处理
+        const { insertDataToDataSource } = require('../src/services/datasource-service');
         const maskedRecords = this.maskSensitiveData(records);
         console.log('\n--- 脱敏后的数据 ---');
         if (maskedRecords[0]) {
             console.log(JSON.stringify(maskedRecords[0], null, 2));
         }
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (let i = 0; i < maskedRecords.length; i++) {
-            const record = maskedRecords[i];
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiToken}`
-                    },
-                    body: JSON.stringify(record)
-                });
-
-                if (response.ok) {
-                    successCount++;
-                    if (successCount % 50 === 0) {
-                        console.log(`  已插入 ${successCount} / ${maskedRecords.length} 条记录...`);
-                    }
-                } else {
-                    failCount++;
-                    const errorText = await response.text();
-                    console.warn(`  插入失败 [${i + 1}/${maskedRecords.length}]: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
-                }
-            } catch (error) {
-                failCount++;
-                console.warn(`  插入异常 [${i + 1}/${maskedRecords.length}]: ${error.message}`);
-            }
-
-            // 添加延迟避免请求过快
-            if (i < maskedRecords.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        console.log(`\nB2C拣货明细数据插入完成`);
-        console.log(`  - 成功: ${successCount} 条`);
-        console.log(`  - 失败: ${failCount} 条`);
+        await insertDataToDataSource(DATASOURCE_ID, maskedRecords, {
+            logPrefix: 'B2C拣货明细'
+        });
     }
 
     /**
@@ -290,24 +211,8 @@ class B2CPakingDetailsExporter {
             return;
         }
 
-        // 获取字段映射
-        const fieldMap = this.getFieldMap();
-
-        // 转换数据字段名
-        const transformedData = data.map(record => {
-            const newRecord = {};
-            for (const [key, value] of Object.entries(record)) {
-                if (key !== '__id') {
-                    const newKey = fieldMap[key] || key;
-                    newRecord[newKey] = value;
-                }
-            }
-            return newRecord;
-        });
-
+        const transformedData = data.map(record => this._transformRecord(record));
         console.log(`B2C拣货明细数据转换完成，共 ${transformedData.length} 条记录`);
-
-        // 直接调用API插入数据
         await this.insertData(transformedData);
     }
 

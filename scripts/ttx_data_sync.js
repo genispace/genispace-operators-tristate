@@ -2,22 +2,97 @@
 /**
  * 通天晓WMS - 数据同步模块
  *
- * 用于将导出数据同步到 Genespace 数据源
+ * 实现《通天晓数据同步步骤》中的 5 个步骤。
+ * 功能入口为 ttx_export.js，通过 .env 中 TTX_SYNC_STEP=1,2 等配置指定步骤。
+ * 本文件主要作为模块被 ttx_export.js 引用，也可独立运行：
  *
- * 使用方法：
- *   const { DataSyncExporter } = require('./ttx_data_sync');
- *   const exporter = new DataSyncExporter();
- *   await exporter.syncAll();
+ *   node ttx_data_sync.js              # 执行全部步骤（读取 TTX_SYNC_STEP，默认 all）
+ *   TTX_SYNC_STEP=1,2 node ttx_data_sync.js
  */
+
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+const { syncDataSourceData } = require('../src/services/datasource-service');
+const { execSync } = require('child_process');
 
 // 从环境变量获取配置
 const API_TOKEN = process.env.GENISPCE_API_TOKEN || 'q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx';
 const BASE_URL = process.env.GENISPCE_BASE_URL || 'https://api.genispace.cn';
 
-/**
- * 数据源配置列表
- */
-const DATA_SOURCES = {
+/** 步骤1：清空镜像表 - 数据源ID（syncDataSourceData 触发删除） */
+const MIRROR_DELETE_DATASOURCES = [
+    {
+        key: 'mirror_inbound_details_raw_delete_all',
+        name: '清空 镜像表-入库单明细',
+        datasourceId: '7263ade3-5c9d-4949-807e-0431cda6c8fb'
+    },
+    {
+        key: 'mirror_inbound_raw_delete_all',
+        name: '清空 镜像表-入库单头部',
+        datasourceId: '9033becb-cc3f-45a6-a361-f2620d189f1a'
+    },
+    {
+        key: 'mirror_b2c_express_package_raw_delete_all',
+        name: '清空 镜像表-B2C快递包裹',
+        datasourceId: 'bb124bb4-2d00-4292-bec6-6c6745410140'
+    },
+    {
+        key: 'mirror_b2c_picking_details_raw_delete_all',
+        name: '清空 镜像表-B2C拣货明细',
+        datasourceId: '126c445e-0437-48f9-a104-ea3bb5910c10'
+    },
+    {
+        key: 'mirror_b2c_raw_delete_all',
+        name: '清空 镜像表-B2C出库单',
+        datasourceId: 'fb22f9a4-ffcc-4a50-9194-d586d6338522'
+    },
+    {
+        key: 'mirror_b2b_raw_delete_all',
+        name: '清空 镜像表-B2B出库单',
+        datasourceId: '7a3174f3-63f4-4913-8748-b713cd443e28'
+    }
+];
+
+/** 步骤3：镜像表 → 临时表（UPSERT）- 数据源ID */
+const MIRROR_TO_TEMP_DATASOURCES = [
+    // temp_b2c_express_package_raw 已废弃, 使用 mirror_b2c_express_package_raw
+    // {
+    //     key: 'mirror_b2c_express_package_to_temp',
+    //     name: 'B2C快递包裹 → 临时表',
+    //     datasourceId: 'ad69038b-0a41-4042-b709-93775b4639ac'
+    // },
+    // temp_b2c_picking_details_raw 已废弃, 使用 mirror_b2c_picking_details_raw
+    // {
+    //     key: 'mirror_b2c_picking_details_to_temp',
+    //     name: 'B2C拣货明细 → 临时表',
+    //     datasourceId: '01a1fb3c-84d3-4e97-ac2d-94ddaa1b8c75'
+    // },
+    {
+        key: 'mirror_b2b_to_temp',
+        name: 'B2B出库单 → 临时表',
+        datasourceId: '248619e6-7a93-4d72-8694-92d9945ef333'
+    },
+    {
+        key: 'mirror_b2c_to_temp',
+        name: 'B2C出库单 → 临时表',
+        datasourceId: 'd9bff880-4e4a-4729-a5fd-22822fa300e7'
+    },
+    // temp_inbound_details_raw 已废弃, 使用 mirror_inbound_details_raw
+    // {
+    //     key: 'mirror_inbound_details_to_temp',
+    //     name: '入库单明细 → 临时表',
+    //     datasourceId: 'b405de25-84f6-4394-a3b9-472c61251659' 
+    // },
+    {
+        key: 'mirror_inbound_to_temp',
+        name: '入库单头部 → 临时表',
+        datasourceId: '86ebcc0c-50e5-4773-81f7-2b66d0e1b7d0'
+    }
+];
+
+/** 步骤4：临时表 → 职能表 - 数据源ID（syncTempToData） */
+const TEMP_TO_DATA_DATASOURCES = {
     purchase_inbound_in_transit: {
         name: '采购入库在途',
         datasourceId: '9c13a06a-2f2f-40d6-b258-ea5a360af918'
@@ -44,6 +119,22 @@ const DATA_SOURCES = {
     }
 };
 
+/** 步骤5：临时表清理 - 数据源ID（后续提供） */
+const TEMP_CLEANUP_DATASOURCES = [];
+
+/**
+ * 解析要执行的步骤
+ * @param {string} stepEnv - 环境变量 TTX_SYNC_STEP 的值，如 "1" / "1,2,3" / "all"
+ * @returns {number[]} 步骤编号数组，如 [1, 2, 3, 4, 5]
+ */
+function parseSyncSteps(stepEnv) {
+    if (!stepEnv || stepEnv.toLowerCase() === 'all') {
+        return [1, 2, 3, 4, 5];
+    }
+    const steps = stepEnv.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 1 && n <= 5);
+    return steps.length > 0 ? [...new Set(steps)].sort((a, b) => a - b) : [1, 2, 3, 4, 5];
+}
+
 /**
  * 数据同步导出器类
  */
@@ -54,155 +145,215 @@ class DataSyncExporter {
         this.timeout = options.timeout || 30000;
     }
 
+    /** 步骤1：删除镜像表（清空当次数据） */
+    async runStep1() {
+        console.log('\n' + '='.repeat(50));
+        console.log('【步骤1】删除镜像表 - 清空当次数据');
+        console.log('='.repeat(50));
+
+        const results = [];
+        for (const config of MIRROR_DELETE_DATASOURCES) {
+            const result = await syncDataSourceData(config.datasourceId, {
+                logPrefix: config.name,
+                apiToken: this.apiToken,
+                baseUrl: this.baseUrl
+            });
+            results.push({ key: config.key, ...result });
+        }
+        return results;
+    }
+
+    /** 步骤2：通天晓导出 → 镜像表（通过 ttx_export.js 执行） */
+    async runStep2() {
+        console.log('\n' + '='.repeat(50));
+        console.log('【步骤2】通天晓导出 → 镜像表');
+        console.log('='.repeat(50));
+        console.log(`调用 ttx_export.js，报表类型: ${process.env.REPORT_TYPE || 'all'}，输出: dataSource\n`);
+
+        const scriptDir = path.dirname(__filename);
+        const ttxExportPath = path.join(scriptDir, 'ttx_export.js');
+        const env = {
+            ...process.env,
+            TTX_SYNC_STEP: '2',         // 子进程仅执行步骤2（通天晓导出→镜像表）
+            REPORT_TYPE: process.env.REPORT_TYPE || 'all',
+            OUTPUT_FORMAT: 'dataSource',
+            TTX_SKIP_FINAL_SYNC: '1'   // 步骤2仅导出入库镜像，不执行临时表→职能表
+        };
+
+        try {
+            execSync(`node "${ttxExportPath}"`, {
+                stdio: 'inherit',
+                env,
+                cwd: scriptDir
+            });
+            return [{ success: true, message: '通天晓导出并写入镜像表完成' }];
+        } catch (error) {
+            console.error('步骤2 执行失败:', error.message);
+            return [{ success: false, message: error.message }];
+        }
+    }
+
+    /** 步骤3：镜像表 → 临时表（UPSERT） */
+    async runStep3() {
+        console.log('\n' + '='.repeat(50));
+        console.log('【步骤3】镜像表 → 临时表 (UPSERT)');
+        console.log('='.repeat(50));
+
+        const results = [];
+        for (const config of MIRROR_TO_TEMP_DATASOURCES) {
+            const result = await syncDataSourceData(config.datasourceId, {
+                logPrefix: config.name,
+                apiToken: this.apiToken,
+                baseUrl: this.baseUrl
+            });
+            results.push({ key: config.key, ...result });
+        }
+        return results;
+    }
+
+    /** 步骤4：临时表 → 职能表 */
+    async runStep4() {
+        console.log('\n' + '='.repeat(50));
+        console.log('【步骤4】临时表 → 职能表');
+        console.log('='.repeat(50));
+
+        const keys = Object.keys(TEMP_TO_DATA_DATASOURCES);
+        const results = [];
+
+        for (const key of keys) {
+            const config = TEMP_TO_DATA_DATASOURCES[key];
+            const result = await syncDataSourceData(config.datasourceId, {
+                logPrefix: config.name,
+                apiToken: this.apiToken,
+                baseUrl: this.baseUrl
+            });
+            results.push({ dataSource: key, ...result });
+        }
+
+        return results;
+    }
+
+    /** 步骤5：临时表清理（占位，后续提供数据源ID） */
+    async runStep5() {
+        console.log('\n' + '='.repeat(50));
+        console.log('【步骤5】临时表清理');
+        console.log('='.repeat(50));
+
+        if (TEMP_CLEANUP_DATASOURCES.length === 0) {
+            console.log('（占位）临时表清理数据源ID尚未配置，跳过');
+            return [{ success: true, message: '占位跳过，待配置 TEMP_CLEANUP_DATASOURCES' }];
+        }
+
+        const results = [];
+        for (const config of TEMP_CLEANUP_DATASOURCES) {
+            const result = await syncDataSourceData(config.datasourceId, {
+                logPrefix: config.name,
+                apiToken: this.apiToken,
+                baseUrl: this.baseUrl
+            });
+            results.push({ key: config.key, ...result });
+        }
+        return results;
+    }
+
     /**
-     * 同步单个数据源
+     * 同步单个职能表数据源（兼容旧接口）
      * @param {string} dataSourceKey 数据源键名
      * @returns {Promise<{success: boolean, message: string}>}
      */
     async syncDataSource(dataSourceKey) {
-        const config = DATA_SOURCES[dataSourceKey];
+        const config = TEMP_TO_DATA_DATASOURCES[dataSourceKey];
         if (!config) {
             console.error(`未找到数据源配置: ${dataSourceKey}`);
             return { success: false, message: `未找到数据源配置: ${dataSourceKey}` };
         }
 
-        const url = `${this.baseUrl}/datasources/${config.datasourceId}/data`;
-        const headers = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiToken}`
-        };
-        const body = JSON.stringify({ d: 'x' });
-
-        console.log(`\n同步数据源: ${config.name}`);
-        console.log(`数据源ID: ${config.datasourceId}`);
-        console.log(`请求URL: ${url}`);
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: body
-            });
-
-            if (response.ok) {
-                const resultText = await response.text();
-                let resultData = null;
-
-                // 解析返回的JSON
-                try {
-                    resultData = JSON.parse(resultText);
-                } catch (e) {
-                    console.warn('返回数据解析失败:', resultText);
-                }
-
-                // 提取影响行数和处理时间
-                const affectedRows = resultData?.data?.affectedRows ?? 'N/A';
-                const executionTime = resultData?.data?.executionTime ?? 'N/A';
-                const operationType = resultData?.data?.operationType ?? 'N/A';
-
-                console.log(`✓ ${config.name} 同步成功`);
-                console.log(`  操作类型: ${operationType}`);
-                console.log(`  影响行数: ${affectedRows}`);
-                console.log(`  执行时间: ${executionTime}ms`);
-
-                return {
-                    success: true,
-                    message: resultText,
-                    affectedRows: affectedRows,
-                    executionTime: executionTime,
-                    operationType: operationType
-                };
-            } else {
-                const errorText = await response.text();
-                console.error(`✗ ${config.name} 同步失败: ${response.status} ${response.statusText}`);
-                console.error(`错误详情: ${errorText}`);
-                return { success: false, message: errorText, status: response.status };
-            }
-        } catch (error) {
-            console.error(`✗ ${config.name} 同步异常: ${error.message}`);
-            return { success: false, message: error.message };
-        }
+        return await syncDataSourceData(config.datasourceId, {
+            logPrefix: config.name,
+            apiToken: this.apiToken,
+            baseUrl: this.baseUrl
+        });
     }
 
     /**
-     * 同步所有数据源
+     * 同步临时表到职能表（步骤4，兼容旧接口）
      * @param {string[]} dataSourceKeys 要同步的数据源列表，默认全部
      * @returns {Promise<{total: number, success: number, failed: number, results: Array}>}
      */
-    async syncAll(dataSourceKeys = null) {
-        const keys = dataSourceKeys || Object.keys(DATA_SOURCES);
+    async syncTempToData(dataSourceKeys = null) {
+        const keys = dataSourceKeys || Object.keys(TEMP_TO_DATA_DATASOURCES);
         const results = [];
         let successCount = 0;
         let failedCount = 0;
 
         console.log('='.repeat(50));
-        console.log('开始数据同步到 Genespace');
+        console.log('开始数据同步到 Genespace（临时表→职能表）');
         console.log('='.repeat(50));
-        console.log(`API Token: ${this.apiToken.substring(0, 10)}...`);
-        console.log(`Base URL: ${this.baseUrl}`);
-        console.log(`待同步数据源数量: ${keys.length}`);
-        console.log('');
 
         for (const key of keys) {
             const result = await this.syncDataSource(key);
-            results.push({
-                dataSource: key,
-                ...result
-            });
-
-            if (result.success) {
-                successCount++;
-            } else {
-                failedCount++;
-            }
-            console.log('');
-        }
-
-        console.log('='.repeat(50));
-        console.log('数据同步完成');
-        console.log('='.repeat(50));
-        console.log(`总计: ${keys.length}`);
-        console.log(`成功: ${successCount}`);
-        console.log(`失败: ${failedCount}`);
-
-        if (failedCount > 0) {
-            console.log('\n失败的数据源:');
-            results.filter(r => !r.success).forEach(r => {
-                console.log(`  - ${r.dataSource}: ${r.message}`);
-            });
+            results.push({ dataSource: key, ...result });
+            if (result.success) successCount++;
+            else failedCount++;
         }
 
         return {
             total: keys.length,
             success: successCount,
             failed: failedCount,
-            results: results
+            results
         };
     }
 
     /**
-     * 获取所有数据源配置
-     * @returns {Object}
+     * 执行完整同步流程（支持分步）
+     * @param {number[]} steps 要执行的步骤列表，默认 [1,2,3,4,5]
+     * @returns {Promise<Object>}
      */
-    static getDataSources() {
-        return DATA_SOURCES;
+    async runSync(steps = [1, 2, 3, 4, 5]) {
+        const stepResults = {};
+        let totalFailed = 0;
+
+        for (const step of steps) {
+            let results = [];
+            switch (step) {
+                case 1:
+                    results = await this.runStep1();
+                    break;
+                case 2:
+                    results = await this.runStep2();
+                    break;
+                case 3:
+                    results = await this.runStep3();
+                    break;
+                case 4:
+                    results = await this.runStep4();
+                    break;
+                case 5:
+                    results = await this.runStep5();
+                    break;
+                default:
+                    console.warn(`未知步骤: ${step}`);
+            }
+            stepResults[`step${step}`] = results;
+            const failed = results.filter(r => r.success === false).length;
+            totalFailed += failed;
+        }
+
+        return { stepResults, totalFailed };
     }
 
-    /**
-     * 获取数据源配置
-     * @param {string} key
-     * @returns {Object|null}
-     */
+    static getDataSources() {
+        return TEMP_TO_DATA_DATASOURCES;
+    }
+
     static getDataSource(key) {
-        return DATA_SOURCES[key] || null;
+        return TEMP_TO_DATA_DATASOURCES[key] || null;
     }
 }
 
 /**
  * 同步单个数据源（便捷函数）
- * @param {string} dataSourceKey 数据源键名
- * @param {Object} options 配置选项
- * @returns {Promise<{success: boolean, message: string}>}
  */
 async function syncDataSource(dataSourceKey, options = {}) {
     const exporter = new DataSyncExporter(options);
@@ -210,25 +361,51 @@ async function syncDataSource(dataSourceKey, options = {}) {
 }
 
 /**
- * 同步所有数据源（便捷函数）
- * @param {string[]} dataSourceKeys 要同步的数据源列表
- * @param {Object} options 配置选项
- * @returns {Promise<{total: number, success: number, failed: number, results: Array}>}
+ * 同步临时表到职能表（便捷函数）
  */
-async function syncAll(dataSourceKeys = null, options = {}) {
+async function syncTempToData(dataSourceKeys = null, options = {}) {
     const exporter = new DataSyncExporter(options);
-    return await exporter.syncAll(dataSourceKeys);
+    return await exporter.syncTempToData(dataSourceKeys);
 }
 
-// 如果直接运行
-if (require.main === module) {
-    console.log('执行数据同步...\n');
+/**
+ * 主入口：按 TTX_SYNC_STEP 执行
+ */
+async function main() {
+    const stepEnv = process.env.TTX_SYNC_STEP;
+    const steps = parseSyncSteps(stepEnv);
 
-    syncAll()
-        .then(result => {
-            console.log('\n同步结果:', JSON.stringify(result, null, 2));
-            process.exit(result.failed > 0 ? 1 : 0);
-        })
+    console.log('=== 通天晓数据同步 ===');
+    console.log(`执行步骤: ${steps.join(', ')}`);
+    console.log(`API: ${BASE_URL}`);
+    console.log(`（可通过 TTX_SYNC_STEP=1 或 1,2,3 指定步骤）\n`);
+
+    const exporter = new DataSyncExporter();
+    const { stepResults, totalFailed } = await exporter.runSync(steps);
+
+    console.log('\n' + '='.repeat(50));
+    console.log('数据同步完成');
+    console.log('='.repeat(50));
+    console.log(`执行步骤: ${steps.join(', ')}`);
+
+    if (totalFailed > 0) {
+        console.log(`\n失败数: ${totalFailed}`);
+        Object.entries(stepResults).forEach(([step, results]) => {
+            const failed = results.filter(r => r.success === false);
+            if (failed.length > 0) {
+                console.log(`  ${step}:`);
+                failed.forEach(r => console.log(`    - ${r.key || r.dataSource}: ${r.message}`));
+            }
+        });
+    }
+
+    return { stepResults, totalFailed };
+}
+
+// 直接运行
+if (require.main === module) {
+    main()
+        .then(({ totalFailed }) => process.exit(totalFailed > 0 ? 1 : 0))
         .catch(error => {
             console.error('同步异常:', error);
             process.exit(1);
@@ -238,6 +415,10 @@ if (require.main === module) {
 module.exports = {
     DataSyncExporter,
     syncDataSource,
-    syncAll,
-    DATA_SOURCES
+    syncTempToData,
+    parseSyncSteps,
+    MIRROR_DELETE_DATASOURCES,
+    MIRROR_TO_TEMP_DATASOURCES,
+    TEMP_TO_DATA_DATASOURCES,
+    DATA_SOURCES: TEMP_TO_DATA_DATASOURCES
 };

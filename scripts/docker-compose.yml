@@ -1,43 +1,28 @@
 version: '3.8'
 
+# 在 scripts 目录执行时，使用 context: .. 指向项目根以便 Dockerfile 能 COPY src/
 services:
   script-tristate-ttx-export:
-    build: .
+    build:
+      context: ..
+      dockerfile: scripts/Dockerfile
     image: magecommerce-docker.pkg.coding.net/genispace/images/script-tristate-ttx-export:latest
     container_name: script-tristate-ttx-export
     
-    # 环境变量配置
+    # 优先从项目根 .env 加载（覆盖镜像中的默认值）
+    env_file:
+      - ../.env
+    # 环境变量配置（与 .env.example 对齐，env_file 中的值会覆盖下面默认值）
     environment:
-      # 连接配置
-      - TTX_BASE_URL=https://ttx.56xyy.com
-      - TTX_CUSTOMER=xyy-wms-prod
-      - TTX_USERNAME=HFLS17
-      - TTX_PASSWORD=Xyy1234567
-      
-      # 报表类型: inbound (入库明细), b2c_shipment (B2C出库单), all (全部)
-      - REPORT_TYPE=all
-      
-      # 通用查询条件
-      - TTX_WAREHOUSE=HF
-      - TTX_COMPANY=HF-SPD
-      # - TTX_START_DATE=2026-02-01 00:00:00  # 不设置则默认本月1日
-      # - TTX_END_DATE=2026-02-28 23:59:59
-      
-      # 入库报表特有条件
-      - TTX_RECEIPT_TYPES=CGRK,DBRK,THRK,QTRK,B2BRK,HHRK
-      
-      # B2C出库单特有条件
-      - TTX_PROCESS_TYPE=NORMAL
-      # - TTX_LEADING_STS_BEGIN=100  # 首状态起始值
-      # - TTX_LEADING_STS_END=100    # 首状态结束值
-      
-      # 输出配置
       - OUTPUT_DIR=/app/output
-      - OUTPUT_FORMAT=both  # csv, json, both
-      
-      # 运行配置
+      - OUTPUT_FORMAT=dataSource
+      - REPORT_TYPE=all
+      - TTX_WAREHOUSE=HF
       - HEADLESS=true
       - PAGE_SIZE=500
+      - TTX_NAVIGATION_TIMEOUT=60000
+      - TTX_SYNC_STEP=all
+      - BATCH_INSERT_SIZE=500
     
     # 挂载输出目录
     volumes:

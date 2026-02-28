@@ -1,11 +1,14 @@
 # 通天晓 WMS 数据导出指南
 
-本项目用于从通天晓 WMS 系统导出各类报表数据，支持入库单头部、入库单明细、B2C 出库单、B2B 出库单四种报表类型。
+本项目用于从通天晓 WMS 系统导出各类报表数据，支持入库单头部、入库单明细、B2C 出库单、B2B 出库单、B2C 拣货明细、入库单扩展报表（receipt_header_ex）等，并可同步至 Genespace 数据源。
+
+> 项目结构、模块说明、数据同步步骤等请参阅 [README.md](./README.md)。
 
 ## 目录
 
 - [快速开始](#快速开始)
 - [环境配置](#环境配置)
+- [Docker 部署](#docker-部署)
 - [使用说明](#使用说明)
 - [报表类型](#报表类型)
 - [字段映射](#字段映射)
@@ -16,12 +19,12 @@
 ## 快速开始
 
 ```bash
-# 安装依赖
-npm install puppeteer-core dotenv
+cd scripts
+npm install puppeteer-core dotenv xlsx
 
-# 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件
+# 配置环境变量（.env 位于项目根目录）
+cp ../.env.example ../.env
+# 编辑 ../.env 文件，填写 TTX_USERNAME、TTX_PASSWORD、GENISPCE_API_TOKEN 等
 
 # 运行导出
 node ttx_export.js
@@ -29,23 +32,60 @@ node ttx_export.js
 
 ## 环境配置
 
-通过 `.env` 文件配置以下参数：
+`.env` 文件位于**项目根目录**（scripts 的上级目录），脚本通过 `../.env` 加载。复制 `.env.example` 为 `.env` 后编辑：
 
-|| 变量名 | 默认值 | 说明 |
-||--------|--------|------|
-|| `TTX_BASE_URL` | `https://ttx.56xyy.com` | 系统地址 |
-|| `TTX_CUSTOMER` | `xyy-wms-prod` | 租户标识 |
-|| `TTX_USERNAME` | `HFLS17` | 用户名 |
-|| `TTX_PASSWORD` | `Xyy1234567` | 密码 |
-|| `TTX_WAREHOUSE` | `HF` | 仓库代码 |
-|| `TTX_COMPANY` | `HF-SPD` | 货主代码 |
-|| `TTX_START_DATE` | `2026-02-05 00:00:00` | 开始日期 |
-|| `TTX_END_DATE` | `2026-02-06 23:59:59` | 结束日期 |
-|| `REPORT_TYPE` | `receipt_header` | 报表类型 |
-|| `OUTPUT_FORMAT` | `dataSource` | 输出格式 |
-|| `OUTPUT_DIR` | `.` | 输出目录 |
-|| `PAGE_SIZE` | `500` | 每页数量 |
-|| `HEADLESS` | `true` | 无头模式 |
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `TTX_BASE_URL` | `https://ttx.56xyy.com` | 通天晓系统地址 |
+| `TTX_CUSTOMER` | `xyy-wms-prod` | 租户标识 |
+| `TTX_USERNAME` | - | 用户名（必填） |
+| `TTX_PASSWORD` | - | 密码（必填） |
+| `TTX_WAREHOUSE` | `HF` | 仓库代码 |
+| `TTX_START_DATE` | - | 开始日期（YYYY-MM-DD HH:mm:ss，不设置则由数据源动态计算） |
+| `TTX_END_DATE` | - | 结束日期 |
+| `REPORT_TYPE` | `all` | 报表类型 |
+| `OUTPUT_FORMAT` | `dataSource` | 输出格式：csv/json/dataSource/both |
+| `OUTPUT_DIR` | `./output` | 输出目录 |
+| `PAGE_SIZE` | `500` | 每页数量 |
+| `HEADLESS` | `true` | 无头模式 |
+| `TTX_NAVIGATION_TIMEOUT` | `60000` | 页面导航超时（毫秒） |
+| `TTX_SYNC_STEP` | `all` | 数据同步步骤：1-5 或 all，示例 `1,2`、`1,3,4` |
+| `TTX_DOWNLOAD_TID` | `EXPORT_TABLES` | 任务中心筛选（ttx_download_center.js） |
+| `TTX_DOWNLOAD_OID` | `receipt_header_ex` | 任务中心筛选 |
+| `BATCH_INSERT_SIZE` | `500` | 批量插入条数 |
+| `GENISPCE_API_TOKEN` | - | Genespace API Token（必填，用于 dataSource 输出） |
+| `GENISPCE_BASE_URL` | `https://api.genispace.cn` | Genespace API 地址 |
+
+## Docker 部署
+
+### 构建镜像
+
+在**项目根目录**执行（Dockerfile 需要访问 `src/` 和 `scripts/`）：
+
+```bash
+docker build -f scripts/Dockerfile -t script-tristate-ttx-export:latest .
+```
+
+### 使用 docker-compose
+
+```bash
+cd scripts
+# 确保项目根目录存在 .env（可从 .env.example 复制）
+docker-compose up --build
+```
+
+`docker-compose.yml` 会从 `../.env` 加载环境变量，并将 `./output` 挂载到容器内 `/app/output`。
+
+### 直接运行容器
+
+```bash
+docker run --rm \
+  -e TTX_USERNAME=HFLS17 \
+  -e TTX_PASSWORD=xxx \
+  -e GENISPCE_API_TOKEN=xxx \
+  -v $(pwd)/output:/app/output \
+  script-tristate-ttx-export:latest
+```
 
 ## 使用说明
 
@@ -130,8 +170,8 @@ node ttx_export.js
   - `B2BRK`: B2B 入库
   - `HHRK`: 货转入库
 - `startDate`: 创建开始日期
-- `endDate`: 创建结束pageSize`: 每日期
-- `页数量（默认 500）
+- `endDate`: 创建结束日期
+- `pageSize`: 每页数量（默认 500）
 
 **输出文件：**
 - `receipt_details_report.csv`
@@ -190,139 +230,139 @@ node ttx_export.js
 
 ### 入库单头部字段映射
 
-|| 原始字段 | 目标字段 |
-||----------|----------|
-|| `id` | `id` |
-|| `code` | `inbound_order_no` |
-|| `erpOrderCode` | `source_order_no` |
-|| `userDef3` | `jit_return_no` |
-|| `receiptType` | `inbound_type` |
-|| `companyCode` | `owner` |
-|| `qtyRatio` | `qty_ratio` |
-|| `totalQty` | `total_qty` |
-|| `totalLines` | `total_lines` |
-|| `leadingSts` | `first_status` |
-|| `trailingSts` | `last_status` |
-|| `returnWaybillCode` | `express_no` |
-|| `shipFromAttentionTo` | `store_name` |
-|| `uploadBatch` | `upload_batch` |
-|| `created` | `create_time` |
-|| `userDef5` | `user_def5` |
-|| `userDef6` | `user_def6` |
-|| `receiptNote` | `remark` |
-|| `endCheckinDatetime` | `callback_time` |
-|| `scheduledArriveDate` | `expected_arrival_date` |
-|| `userDef1` | `user_def1` |
-|| `shipFromName` | `supplier_name` |
-|| `auditStatus` | `audit_status` |
-|| `iqcStatus` | `iqc_status` |
-|| `iqcPoint` | `iqc_point` |
-|| `crossDockMode` | `cross_dock_mode` |
-|| `returnException` | `return_exception` |
-|| `consolidateCode` | `consolidate_code` |
-|| `purchaseOrderCode` | `purchase_order_code` |
-|| `warehouseTransferCode` | `warehouse_transfer_code` |
-|| `warehouseCode` | `warehouse` |
+| 原始字段 | 目标字段 |
+|----------|----------|
+| `id` | `id` |
+| `code` | `inbound_order_no` |
+| `erpOrderCode` | `source_order_no` |
+| `userDef3` | `jit_return_no` |
+| `receiptType` | `inbound_type` |
+| `companyCode` | `owner` |
+| `qtyRatio` | `qty_ratio` |
+| `totalQty` | `total_qty` |
+| `totalLines` | `total_lines` |
+| `leadingSts` | `first_status` |
+| `trailingSts` | `last_status` |
+| `returnWaybillCode` | `express_no` |
+| `shipFromAttentionTo` | `store_name` |
+| `uploadBatch` | `upload_batch` |
+| `created` | `create_time` |
+| `userDef5` | `user_def5` |
+| `userDef6` | `user_def6` |
+| `receiptNote` | `remark` |
+| `endCheckinDatetime` | `callback_time` |
+| `scheduledArriveDate` | `expected_arrival_date` |
+| `userDef1` | `user_def1` |
+| `shipFromName` | `supplier_name` |
+| `auditStatus` | `audit_status` |
+| `iqcStatus` | `iqc_status` |
+| `iqcPoint` | `iqc_point` |
+| `crossDockMode` | `cross_dock_mode` |
+| `returnException` | `return_exception` |
+| `consolidateCode` | `consolidate_code` |
+| `purchaseOrderCode` | `purchase_order_code` |
+| `warehouseTransferCode` | `warehouse_transfer_code` |
+| `warehouseCode` | `warehouse` |
 
 ### 入库单明细字段映射
 
-|| 原始字段 | 目标字段 |
-||----------|----------|
-|| `货主` | `owner` |
-|| `入库单号` | `inbound_order_no` |
-|| `来源单号` | `source_order_no` |
-|| `入库单类型` | `inbound_type` |
-|| `货品编码` | `sku` |
-|| `库存状态` | `inventory_status` |
-|| `计划数量` | `planned_qty` |
-|| `已收货数` | `received_qty` |
-|| `已上架数` | `shelved_qty` |
-|| `货号` | `style_number` |
-|| `商品名称` | `product_name` |
-|| `颜色` | `color_number` |
-|| `规格` | `product_size` |
-|| `创建时间` | `create_time` |
-|| `收货日期` | `received_time` |
-|| `首状态` | `first_status` |
-|| `尾状态` | `last_status` |
-|| `整单完成时间` | `completion_time` |
-|| `客退快递单号` | `express_tracking_no` |
-|| `备注` | `remark` |
-|| `仓库` | `warehouse` |
+| 原始字段 | 目标字段 |
+|----------|----------|
+| `货主` | `owner` |
+| `入库单号` | `inbound_order_no` |
+| `来源单号` | `source_order_no` |
+| `入库单类型` | `inbound_type` |
+| `货品编码` | `sku` |
+| `库存状态` | `inventory_status` |
+| `计划数量` | `planned_qty` |
+| `已收货数` | `received_qty` |
+| `已上架数` | `shelved_qty` |
+| `货号` | `style_number` |
+| `商品名称` | `product_name` |
+| `颜色` | `color_number` |
+| `规格` | `product_size` |
+| `创建时间` | `create_time` |
+| `收货日期` | `received_time` |
+| `首状态` | `first_status` |
+| `尾状态` | `last_status` |
+| `整单完成时间` | `completion_time` |
+| `客退快递单号` | `express_tracking_no` |
+| `备注` | `remark` |
+| `仓库` | `warehouse` |
 
 ### B2C 出库单字段映射
 
-|| 原始字段 | 目标字段 |
-||----------|----------|
-|| `id` | `order_id` |
-|| `created` | `create_time` |
-|| `frontTime` | `order_time` |
-|| `payTime` | `payment_time` |
-|| `code` | `order_no` |
-|| `shipmentType` | `outbound_type` |
-|| `companyCode` | `owner` |
-|| `carrierCode` | `carrier` |
-|| `processType` | `process_type` |
-|| `sourceOrderCode` | `platform_order_no` |
-|| `primaryWaybillCode` | `express_no` |
-|| `waveId` | `wave` |
-|| `storeName` | `store` |
-|| `shipToState` | `province` |
-|| `shipToCity` | `city` |
-|| `qtyRatio` | `amount` |
-|| `totalQty` | `total_qty` |
-|| `totalLines` | `total_lines` |
-|| `shipToAttentionTo` | `receiver` |
-|| `consolidated` | `consolidated` |
-|| `warehouseTransferCode` | `warehouse_transfer_code` |
-|| `leadingSts` | `first_status` |
-|| `trailingSts` | `last_status` |
-|| `uploadByAt` | `upload_time` |
-|| `uploadByUser` | `upload_user` |
-|| `rejectionNote` | `failure_reason` |
-|| `actualShipDateTime` | `outbound_time` |
-|| `uploadBatch` | `upload_batch` |
-|| `deliveryNote` | `order_remark` |
-|| `warehouseCode` | `warehouse` |
-|| `isPresale` | `is_presale` |
-|| `sourcePlatform` | `source_platform` |
-|| `plannedQty` | `review_qty` |
-|| `pickedQty` | `picking_qty` |
-|| `packedQty` | `outbound_qty` |
+| 原始字段 | 目标字段 |
+|----------|----------|
+| `id` | `order_id` |
+| `created` | `create_time` |
+| `frontTime` | `order_time` |
+| `payTime` | `payment_time` |
+| `code` | `order_no` |
+| `shipmentType` | `outbound_type` |
+| `companyCode` | `owner` |
+| `carrierCode` | `carrier` |
+| `processType` | `process_type` |
+| `sourceOrderCode` | `platform_order_no` |
+| `primaryWaybillCode` | `express_no` |
+| `waveId` | `wave` |
+| `storeName` | `store` |
+| `shipToState` | `province` |
+| `shipToCity` | `city` |
+| `qtyRatio` | `amount` |
+| `totalQty` | `total_qty` |
+| `totalLines` | `total_lines` |
+| `shipToAttentionTo` | `receiver` |
+| `consolidated` | `consolidated` |
+| `warehouseTransferCode` | `warehouse_transfer_code` |
+| `leadingSts` | `first_status` |
+| `trailingSts` | `last_status` |
+| `uploadByAt` | `upload_time` |
+| `uploadByUser` | `upload_user` |
+| `rejectionNote` | `failure_reason` |
+| `actualShipDateTime` | `outbound_time` |
+| `uploadBatch` | `upload_batch` |
+| `deliveryNote` | `order_remark` |
+| `warehouseCode` | `warehouse` |
+| `isPresale` | `is_presale` |
+| `sourcePlatform` | `source_platform` |
+| `plannedQty` | `review_qty` |
+| `pickedQty` | `picking_qty` |
+| `packedQty` | `outbound_qty` |
 
 ### B2B 出库单字段映射
 
-|| 原始字段 | 目标字段 |
-||----------|----------|
-|| `id` | `order_id` |
-|| `created` | `create_time` |
-|| `code` | `order_no` |
-|| `shipmentType` | `outbound_type` |
-|| `companyCode` | `owner` |
-|| `carrierCode` | `carrier` |
-|| `processType` | `process_type` |
-|| `userDef1` | `customer` |
-|| `primaryWaybillCode` | `express_no` |
-|| `waveId` | `wave` |
-|| `shipToName` | `customer_name` |
-|| `shipTo` | `vip_order_no` |
-|| `shipToAttentionTo` | `receiver` |
-|| `shipToState` | `province` |
-|| `shipToCity` | `city` |
-|| `qtyRatio` | `amount` |
-|| `totalQty` | `total_qty` |
-|| `totalLines` | `total_lines` |
-|| `totalContainers` | `total_boxes` |
-|| `consolidated` | `consolidated` |
-|| `leadingSts` | `first_status` |
-|| `trailingSts` | `last_status` |
-|| `uploadBatch` | `upload_batch` |
-|| `deliveryNote` | `order_remark` |
-|| `rejectionNote` | `failure_reason` |
-|| `sourcePlatform` | `source_platform` |
-|| `userDef8` | `callback_time` |
-|| `packageCenterName` | `store` |
-|| `warehouseCode` | `warehouse` |
+| 原始字段 | 目标字段 |
+|----------|----------|
+| `id` | `order_id` |
+| `created` | `create_time` |
+| `code` | `order_no` |
+| `shipmentType` | `outbound_type` |
+| `companyCode` | `owner` |
+| `carrierCode` | `carrier` |
+| `processType` | `process_type` |
+| `userDef1` | `customer` |
+| `primaryWaybillCode` | `express_no` |
+| `waveId` | `wave` |
+| `shipToName` | `customer_name` |
+| `shipTo` | `vip_order_no` |
+| `shipToAttentionTo` | `receiver` |
+| `shipToState` | `province` |
+| `shipToCity` | `city` |
+| `qtyRatio` | `amount` |
+| `totalQty` | `total_qty` |
+| `totalLines` | `total_lines` |
+| `totalContainers` | `total_boxes` |
+| `consolidated` | `consolidated` |
+| `leadingSts` | `first_status` |
+| `trailingSts` | `last_status` |
+| `uploadBatch` | `upload_batch` |
+| `deliveryNote` | `order_remark` |
+| `rejectionNote` | `failure_reason` |
+| `sourcePlatform` | `source_platform` |
+| `userDef8` | `callback_time` |
+| `packageCenterName` | `store` |
+| `warehouseCode` | `warehouse` |
 
 ### B2C拣货明细字段映射
 
@@ -365,11 +405,11 @@ node ttx_export.js
 
 ### 示例
 
-|| 原始值 | 脱敏后 |
-||--------|--------|
-|| `##Wdir4LnZa3G4CdOiNBDpR9C04r...` | `******` |
-|| `李世辉` | `李世辉` |
-|| `小**` | `小**` |
+| 原始值 | 脱敏后 |
+|--------|--------|
+| `##Wdir4LnZa3G4CdOiNBDpR9C04r...` | `******` |
+| `李世辉` | `李世辉` |
+| `小**` | `小**` |
 
 ### 代码实现
 
@@ -404,70 +444,66 @@ maskSensitiveData(records) {
 
 ## API 配置
 
-### 入库单头部 API
+数据源 API 的 Base URL 和 Token 通过 `.env` 中的 `GENISPCE_BASE_URL`、`GENISPCE_API_TOKEN` 配置，各报表对应的数据源 ID 在脚本中已内置。
 
-- **URL**: `https://api.genispace.cn/datasources/ace5c767-4bce-4da0-b46b-e36e9af365a1/data`
-- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
+### 数据源 ID 一览
 
-### 入库单明细 API
+| 报表类型 | 数据源 ID |
+|----------|-----------|
+| 入库单头部 | `ace5c767-4bce-4da0-b46b-e36e9af365a1` |
+| 入库单明细 | `c2306183-f7c2-4a56-bc8f-59c37882afca` |
+| B2C 出库单 | `e7fbe6d1-060a-4fd8-9c32-77cf960bf5c7` |
+| B2B 出库单 | `809a7e42-6f79-4a82-b776-2734a7076f25` |
+| B2C 拣货明细 | `da65089e-0772-465c-b034-06956304c373` |
 
-- **URL**: `https://api.genispace.cn/datasources/c2306183-f7c2-4a56-bc8f-59c37882afca/data`
-- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
-
-### B2C 出库单 API
-
-- **URL**: `https://api.genispace.cn/datasources/e7fbe6d1-060a-4fd8-9c32-77cf960bf5c7/data`
-- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
-
-### B2B 出库单 API
-
-- **URL**: `https://api.genispace.cn/datasources/809a7e42-6f79-4a82-b776-2734a7076f25/data`
-- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
-
-### B2C 拣货明细 API
-
-- **URL**: `https://api.genispace.cn/datasources/da65089e-0772-465c-b034-06956304c373/data`
-- **Token**: `q16Z2piek6iYG3f4TnNwRXyRxa9cp6wdm8ddcEpx`
+API 地址格式：`${GENISPCE_BASE_URL}/datasources/${datasourceId}/data`
 
 ## 常见问题
 
-### 登录失败
+### 找不到 Chrome/Chromium
 
-如果提示找不到 Chrome/Chromium 浏览器，请检查系统是否已安装 Chrome 浏览器，或者设置 `CHROME_PATH` 环境变量。
+- **本地运行**：安装 Chrome 或 Chromium，或设置 `PUPPETEER_EXECUTABLE_PATH`
+- **Docker**：镜像已内置 Chromium，无需额外配置
 
 ### 获取不到数据
 
-检查筛选条件是否过于严格，建议先使用较宽的时间范围测试。
+检查 `TTX_START_DATE`、`TTX_END_DATE` 及仓库、货主等筛选条件是否合理，建议先用较宽的时间范围测试。
 
 ### API 插入失败
 
-检查 API URL 和 Token 是否正确，以及网络连接是否正常。
+确认 `.env` 中 `GENISPCE_API_TOKEN`、`GENISPCE_BASE_URL` 正确，并检查网络连通性。
+
+### .env 未生效
+
+`.env` 位于**项目根目录**，路径为 `../.env`（相对于 `scripts/`）。若从其他目录运行，需保证该路径下存在 `.env`。
 
 ## 文件结构
 
 ```
 scripts/
-├── ttx_export.js              # 主导出脚本（入口）
-├── ttx_receipt_header.js      # 入库单头部导出模块
-├── ttx_receipt_details.js     # 入库单明细导出模块
-├── ttx_b2c_shipment.js        # B2C 出库单导出模块
-├── ttx_b2b_shipment.js        # B2B 出库单导出模块
-├── ttx_b2c_paking_details.js # B2C 拣货明细导出模块
-├── .env.example               # 环境变量示例
-└── output/                    # 输出目录
-    ├── b2c_shipment_report.json
-    ├── b2b_shipment_report.json
-    ├── b2c_paking_details_report.json
-    └── inbound_report.json
+├── ttx_export.js               # 主导出脚本（入口，支持 TTX_SYNC_STEP 分步）
+├── ttx_data_sync.js            # 数据同步模块（镜像表→临时表→职能表）
+├── ttx_download_center.js      # 任务中心导出文件下载
+├── ttx_receipt_header.js       # 入库单头部
+├── ttx_receipt_header_ex.js    # 入库单扩展（Excel 任务中心）
+├── ttx_receipt_details.js      # 入库单明细
+├── ttx_b2c_shipment.js         # B2C 出库单
+├── ttx_b2b_shipment.js         # B2B 出库单
+├── ttx_b2c_paking_details.js   # B2C 拣货明细
+├── test_last_run_date.js       # 测试最后运行日期
+├── Dockerfile                  # Docker 镜像构建
+├── docker-compose.yml          # Docker Compose 配置
+└── output/                     # 输出目录（可挂载）
 ```
 
 ## 更新日志
 
-|| 日期 | 版本 | 变更说明 |
-||------|------|----------|
-|| 2026-02-10 | 1.0 | 初始版本，支持入库单头部和 B2C 出库单导出 |
-|| 2026-02-10 | 1.1 | 新增入库单明细导出功能；优化字段映射 |
-|| 2026-02-10 | 1.2 | 新增 dataSource 输出格式；支持直接同步到 API |
-|| 2026-02-10 | 1.3 | 新增 receiver 字段脱敏功能 |
-|| 2026-02-11 | 1.4 | 新增 B2B 出库单导出功能；支持 B2B 敏感字段脱敏 |
-| 1.5 | 新增 B2C 拣货明细导出功能 |
+| 日期 | 版本 | 变更说明 |
+|------|------|----------|
+| 2026-02-10 | 1.0 | 初始版本，支持入库单头部和 B2C 出库单导出 |
+| 2026-02-10 | 1.1 | 新增入库单明细导出功能；优化字段映射 |
+| 2026-02-10 | 1.2 | 新增 dataSource 输出格式；支持直接同步到 API |
+| 2026-02-10 | 1.3 | 新增 receiver 字段脱敏功能 |
+| 2026-02-11 | 1.4 | 新增 B2B 出库单导出功能；支持 B2B 敏感字段脱敏 |
+| 2026-02-11 | 1.5 | 新增 B2C 拣货明细导出功能 |
+| 2026-02-28 | 1.6 | 完善 Docker 部署说明；补充 .env 变量；修复表格格式 |

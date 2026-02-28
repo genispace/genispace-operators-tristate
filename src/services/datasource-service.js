@@ -229,9 +229,53 @@ async function syncDataSourceData(datasourceId, options = {}) {
     }
 }
 
+/**
+ * 获取数据源数据（用于读取最后运行日期等）
+ *
+ * @param {string} datasourceId - 数据源 ID (UUID)
+ * @param {Object} options - 可选配置
+ * @param {string} options.apiToken - API Token
+ * @param {string} options.baseUrl - API 基础 URL
+ * @returns {Promise<{success: boolean, data?: *, rawResponse?: *}>}
+ */
+async function getDataSourceData(datasourceId, options = {}) {
+    const apiToken = options.apiToken || API_TOKEN;
+    const baseUrl = options.baseUrl || BASE_URL;
+    const url = `${baseUrl}/datasources/${datasourceId}/data`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiToken}`
+            }
+        });
+
+        if (response.ok) {
+            const resultText = await response.text();
+            let data = null;
+            try {
+                data = resultText ? JSON.parse(resultText) : null;
+            } catch (e) {
+                return { success: true, rawResponse: resultText };
+            }
+            return { success: true, data };
+        } else {
+            const errorText = await response.text();
+            console.warn(`获取数据源失败: ${response.status} ${response.statusText} - ${errorText.substring(0, 200)}`);
+            return { success: false, status: response.status, message: errorText };
+        }
+    } catch (error) {
+        console.warn(`获取数据源异常: ${error.message}`);
+        return { success: false, message: error.message };
+    }
+}
+
 module.exports = {
     insertDataSourceData,
     batchInsertDataSourceData,
     insertDataToDataSource,
-    syncDataSourceData
+    syncDataSourceData,
+    getDataSourceData
 };

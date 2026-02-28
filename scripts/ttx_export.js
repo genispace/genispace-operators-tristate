@@ -24,6 +24,70 @@ const { B2CShipmentExporter } = require('./ttx_b2c_shipment');
 const { B2BShipmentExporter } = require('./ttx_b2b_shipment');
 const { B2CPakingDetailsExporter } = require('./ttx_b2c_paking_details');
 const { DataSyncExporter, parseSyncSteps } = require('./ttx_data_sync');
+const { getDataSourceData, syncDataSourceData } = require('../src/services/datasource-service');
+
+/** 获取最后运行日期的数据源ID */
+const LAST_RUN_DATE_GET_DATASOURCE_ID = '039b4491-978a-4ac1-b7c7-19dc6ffdc0ca';
+/** 更新最后运行日期的数据源ID */
+const LAST_RUN_DATE_UPDATE_DATASOURCE_ID = '49e0a1a3-7ee4-415b-a60c-44f34550d811';
+
+/** 从 API 响应中解析最后运行日期，支持 data.data[].last_run_time 格式 */
+function parseLastRunDateFromResponse(result) {
+    if (!result.success || !result.data) return null;
+    const d = result.data;
+    const arr = (d.data && d.data.data) || d.data || d.rows || (Array.isArray(d) ? d : null);
+    if (Array.isArray(arr) && arr.length > 0) {
+        const row = arr[0];
+        const val = row.last_run_time || row.last_run_date || row.run_date || row.date || row.value;
+        if (val) {
+            const str = String(val).trim();
+            const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            return m ? `${m[1]}-${m[2]}-${m[3]}` : str.slice(0, 10);
+        }
+    }
+    return null;
+}
+
+/**
+ * 解析日期范围：从最后运行日期数据源获取，startDate=最后运行日期-10天，endDate=当天
+ * @returns {Promise<{startDate: string, endDate: string}>}
+ */
+async function resolveDateRange() {
+    const envStart = process.env.TTX_START_DATE;
+    const envEnd = process.env.TTX_END_DATE;
+    if (envStart && envEnd) {
+        return { startDate: envStart.trim(), endDate: envEnd.trim() };
+    }
+
+    const today = new Date();
+    const endDateStr = today.toISOString().slice(0, 10) + ' 23:59:59';
+    let lastRunDateStr = null;
+
+    const result = await getDataSourceData(LAST_RUN_DATE_GET_DATASOURCE_ID);
+    lastRunDateStr = parseLastRunDateFromResponse(result);
+
+    let startDateStr;
+    if (lastRunDateStr) {
+        const m = lastRunDateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) {
+            const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+            d.setDate(d.getDate() - 10);
+            startDateStr = d.toISOString().slice(0, 10) + ' 00:00:00';
+            console.log(`日期范围: 最后运行日期=${lastRunDateStr}, TTX_START_DATE=${startDateStr} (前10天), TTX_END_DATE=${endDateStr}`);
+        } else {
+            const d = new Date(today);
+            d.setDate(d.getDate() - 10);
+            startDateStr = d.toISOString().slice(0, 10) + ' 00:00:00';
+        }
+    } else {
+        const d = new Date(today);
+        d.setDate(d.getDate() - 10);
+        startDateStr = d.toISOString().slice(0, 10) + ' 00:00:00';
+        console.log(`未获取到最后运行日期，使用默认: TTX_START_DATE=${startDateStr}, TTX_END_DATE=${endDateStr}`);
+    }
+
+    return { startDate: startDateStr, endDate: endDateStr };
+}
 
 /**
  * 查找系统中安装的 Chrome/Chromium 路径
@@ -74,10 +138,10 @@ function getConfig() {
         // 报表类型（步骤2时）: receipt_header, receipt_header_ex, receipt_details, b2c_shipment, b2b_shipment, paking_details, all
         reportType: process.env.REPORT_TYPE || 'all',
 
-        // 通用查询条件
+        // 通用查询条件（startDate/endDate 由 resolveDateRange 动态解析，此处仅作占位）
         warehouseCode: process.env.TTX_WAREHOUSE || 'HF',
-        startDate: process.env.TTX_START_DATE || '2026-02-05 00:00:00',
-        endDate: process.env.TTX_END_DATE || '2026-02-06 23:59:59',
+        startDate: null,
+        endDate: null,
 
         // 运行配置
         headless: process.env.HEADLESS !== 'false',
@@ -190,9 +254,16 @@ async function runBrowserExportToMirror(config, browserInstance = null, reportTy
 async function main() {
     const config = getConfig();
 
+    const dateRange = await resolveDateRange();
+    config.startDate = dateRange.startDate;
+    config.endDate = dateRange.endDate;
+
     const steps = parseSyncSteps(config.ttSyncStep);
+    const isFullSync = !config.ttSyncStep || config.ttSyncStep.toLowerCase() === 'all';
+
     console.log('=== 通天晓数据同步（ttx_export.js 入口）===');
     console.log(`执行步骤: ${steps.join(', ')} (TTX_SYNC_STEP=${config.ttSyncStep})`);
+    console.log(`日期范围: ${config.startDate} ~ ${config.endDate}`);
     console.log(`目标: ${config.baseUrl}`);
     console.log(`租户: ${config.customer}`);
     console.log('');
@@ -231,6 +302,18 @@ async function main() {
     }
 
     console.log('\n=== 数据同步完成 ===');
+
+    if (totalFailed === 0 && isFullSync) {
+        const updateResult = await syncDataSourceData(LAST_RUN_DATE_UPDATE_DATASOURCE_ID, { logPrefix: '最后运行日期' });
+        if (updateResult.success) {
+            console.log('✓ 已更新最后运行日期');
+        } else {
+            console.warn(`更新最后运行日期失败: ${updateResult.message || '未知错误'}`);
+        }
+    } else if (!isFullSync) {
+        console.log('（单步执行，跳过更新最后运行日期）');
+    }
+
     if (totalFailed > 0) process.exit(1);
 }
 
